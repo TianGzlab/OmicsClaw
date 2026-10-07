@@ -19,10 +19,21 @@ functions return objects; a step chooses its own output paths with
 ## Gallery
 
 `figures/manifest.json` records which plots rendered or were skipped.
-The recipe includes cluster sizes, PCA variance, QC distributions, UMAP
-and spatial Leiden plots. Spatial plots need coordinates; the resolution
-sweep plot needs `--resolutions`. See `_build_preprocess_visualization_recipe`
-in `spatial_preprocess.py` for individual plot conditions.
+The seven possible PNG outputs and their recipe conditions are:
+
+| File | Required state |
+|---|---|
+| `figures/spatial_leiden.png` | Leiden labels and spatial coordinates |
+| `figures/umap_leiden.png` | Leiden labels and `obsm['X_umap']` |
+| `figures/qc_metrics_spatial.png` | Spatial coordinates and at least one QC metric |
+| `figures/cluster_size_barplot.png` | A nonempty cluster summary |
+| `figures/pca_variance_curve.png` | A nonempty PCA variance table |
+| `figures/leiden_resolution_sweep.png` | A nonempty multi-resolution summary from `--resolutions` |
+| `figures/qc_metric_distributions.png` | A nonempty QC distribution table |
+
+These conditions match `_build_preprocess_visualization_recipe` in
+`spatial_preprocess.py`. A renderer can still fail; consult the manifest
+for the files actually produced.
 
 `figure_data/manifest.json` names the exported plot data:
 
