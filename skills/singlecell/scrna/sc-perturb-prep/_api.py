@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+import json
 
 __all__ = ["standardize_mapping", "collapse_assignments", "attach_assignments", "run_info",
            "assignment_summary", "perturbation_counts", "perturbation_counts_figure"]
@@ -58,19 +58,21 @@ def attach_assignments(adata, assignments, *, pert_key="perturbation", sgrna_key
     for key in (pert_key, sgrna_key, target_key, 'assignment_status'):
         result.obs[key] = prepared.obs[key].astype(str).values
     result.obs['n_sgrnas'] = prepared.obs['n_sgrnas'].astype(int).values
-    result.uns['sc_perturb_prep_run_info'] = {
+    result.uns['sc_perturb_prep_run_info'] = json.dumps({
         'n_cells_input': int(adata.n_obs), 'n_cells_assigned': int(result.n_obs),
         'n_non_gene_features_removed': feature_summary['n_non_gene_features_removed'],
         'feature_types': feature_summary['feature_types'], 'expression_source': sources.expression_source,
         'gene_name_source': sources.gene_name_source, 'input_contract': contract,
         'pert_key': pert_key, 'sgrna_key': sgrna_key, 'target_key': target_key,
-    }
+    })
     return result
 
 
-def run_info(adata):
-    """Return a copy of preparation counts, feature types and input provenance."""
-    return deepcopy(adata.uns.get('sc_perturb_prep_run_info', {}))
+def run_info(adata, *, keep: bool = True):
+    """Return preparation provenance; keep=False removes the run record."""
+    key = 'sc_perturb_prep_run_info'
+    raw = adata.uns.get(key, '{}') if keep else adata.uns.pop(key, '{}')
+    return json.loads(raw)
 
 
 def assignment_summary(adata):

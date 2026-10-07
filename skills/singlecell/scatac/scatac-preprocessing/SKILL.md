@@ -154,9 +154,9 @@ Return cell counts and percentages for labels in obs[cluster_key].
 
 Return a cluster-colored Figure from obsm['X_umap']; do not write a file.
 
-### `run_info(adata)`
+### `run_info(adata, *, keep: bool=True)`
 
-Return the TF-IDF/LSI parameters recorded on the output AnnData.
+Return TF-IDF/LSI parameters; keep=False removes the run record.
 
 <!-- api:end -->
 

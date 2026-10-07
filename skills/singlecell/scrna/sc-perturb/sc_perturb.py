@@ -274,7 +274,7 @@ def main() -> int:
         pval_cutoff=args.pval_cutoff, perturbation_type=args.perturbation_type,
         random_state=args.seed,
     )
-    result = _api.run_info(adata)
+    result = _api.run_info(adata, keep=False)
     class_counts = _api.class_counts(adata)
     global_counts = _api.global_class_counts(adata)
     class_counts.to_csv(tables_dir / "mixscape_class_counts.csv", index=False)

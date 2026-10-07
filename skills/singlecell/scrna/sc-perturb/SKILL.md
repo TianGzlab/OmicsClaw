@@ -72,9 +72,9 @@ before log-normalization. split_by=None selects nearest-neighbour controls.
 Both pertpy stages receive random_state; a missing control or split column
 raises ValueError. Requires pertpy (validated with 1.0.3 and sklearn 1.7.2).
 
-### `run_info(adata)`
+### `run_info(adata, *, keep: bool=True)`
 
-Return method, seed and output-column names as a small diagnostic dictionary.
+Return method, seed and output columns; keep=False removes the run record.
 
 ### `class_counts(adata)`
 

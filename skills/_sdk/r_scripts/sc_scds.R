@@ -29,10 +29,11 @@ tryCatch({
     cat(sprintf("Loading data from %s...\n", input_dir))
     counts <- as(Matrix::readMM(file.path(input_dir, "matrix.mtx")), "CsparseMatrix")
     rownames(counts) <- read.delim(file.path(input_dir, "features.tsv"), header = FALSE,
-                                  colClasses = "character", quote = "")[[1]]
+                                  colClasses = "character", quote = "", na.strings = NULL)[[1]]
     colnames(counts) <- read.delim(file.path(input_dir, "barcodes.tsv"), header = FALSE,
-                                  colClasses = "character", quote = "")[[1]]
-    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE)
+                                  colClasses = "character", quote = "", na.strings = NULL)[[1]]
+    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE,
+                     colClasses = "character", na.strings = NULL)
     stopifnot(identical(rownames(meta), colnames(counts)))
     sce <- SingleCellExperiment(assays = list(counts = round(counts)), colData = meta)
 
@@ -66,7 +67,7 @@ tryCatch({
         row.names = colnames(sce)
     )
 
-    write.csv(out, file.path(output_dir, "scds_results.csv"), quote = FALSE)
+    write.csv(out, file.path(output_dir, "scds_results.csv"))
     n_doublets <- sum(out$predicted_doublet)
     cat(sprintf("Done. %d doublets detected out of %d cells (%.1f%%)\n",
         n_doublets, nrow(out), 100 * n_doublets / nrow(out)))

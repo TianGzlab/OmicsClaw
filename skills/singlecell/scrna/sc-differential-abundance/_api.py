@@ -125,9 +125,10 @@ def proportion_figure(proportions: pd.DataFrame):
     return fig
 
 
-def run_info(table: pd.DataFrame) -> dict:
-    """Return the requested method, executed backend, fallback reason and seed."""
-    return deepcopy(table.attrs[_RUN_KEY])
+def run_info(table: pd.DataFrame, *, keep: bool = True) -> dict:
+    """Return backend and seed diagnostics; keep=False removes the table's run record."""
+    info = table.attrs.get(_RUN_KEY, {}) if keep else table.attrs.pop(_RUN_KEY, {})
+    return deepcopy(info)
 
 def run_milo_da(
     adata: AnnData,

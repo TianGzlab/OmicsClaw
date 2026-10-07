@@ -235,7 +235,7 @@ def main() -> int:
         adata, assigned_df, pert_key=args.pert_key, sgrna_key=args.sgrna_key,
         target_key=args.target_key, species=args.species,
     )
-    prep_info = _api.run_info(standardized)
+    prep_info = _api.run_info(standardized, keep=False)
     feature_summary = prep_info
     contract = prep_info["input_contract"]
 

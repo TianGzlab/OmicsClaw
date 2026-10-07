@@ -27,10 +27,11 @@ tryCatch({
     cat(sprintf("Loading data from %s...\n", input_dir))
     counts <- as(Matrix::readMM(file.path(input_dir, "matrix.mtx")), "CsparseMatrix")
     rownames(counts) <- read.delim(file.path(input_dir, "features.tsv"), header = FALSE,
-                                  colClasses = "character", quote = "")[[1]]
+                                  colClasses = "character", quote = "", na.strings = NULL)[[1]]
     colnames(counts) <- read.delim(file.path(input_dir, "barcodes.tsv"), header = FALSE,
-                                  colClasses = "character", quote = "")[[1]]
-    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE)
+                                  colClasses = "character", quote = "", na.strings = NULL)[[1]]
+    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE,
+                     colClasses = "character", na.strings = NULL)
     stopifnot(identical(rownames(meta), colnames(counts)))
 
     set.seed(if (length(args) >= 4) as.integer(args[4]) else 0)
@@ -65,7 +66,7 @@ tryCatch({
         row.names        = colnames(seurat_obj)
     )
 
-    write.csv(out, file.path(output_dir, "doubletfinder_results.csv"), quote = FALSE)
+    write.csv(out, file.path(output_dir, "doubletfinder_results.csv"))
 
     n_doublets <- sum(out$predicted_doublet)
     cat(sprintf("Done. %d doublets detected out of %d cells (%.1f%%)\n",

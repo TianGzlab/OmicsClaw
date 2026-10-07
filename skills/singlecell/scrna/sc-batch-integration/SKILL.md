@@ -31,7 +31,10 @@ Start a notebook step with `python skills/_sdk/notebook/run.py new integration`.
 Inside it, use `integration = load_skill("sc-batch-integration")`, then
 `adata = integration.integrate(adata, method="harmony", batch_key="batch")`.
 This returns the corrected representation; choose neighbours, UMAP and
-clustering separately with `sc-clustering`. BBKNN already builds its graph.
+clustering separately with `sc-clustering`. After BBKNN, call
+`load_skill("sc-clustering").cluster(adata, use_existing_graph=True)` to keep
+the corrected graph. The default clustering call rebuilds it and loses BBKNN's
+batch correction.
 The CLI additionally builds neighbours/UMAP and writes the legacy report.
 See `examples/example_step.py` for a runnable PBMC example.
 

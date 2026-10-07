@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+import json
 
 __all__ = ["mixscape", "run_info", "class_counts", "global_class_counts", "global_class_figure"]
 
@@ -37,16 +37,18 @@ def mixscape(adata, *, pert_key="perturbation", control="NT", split_by="replicat
         result, pert_key=pert_key, control=control, split_by=split_by,
         n_neighbors=n_neighbors, logfc_threshold=logfc_threshold, pval_cutoff=pval_cutoff,
         perturbation_type=perturbation_type, random_state=random_state)
-    result.uns['sc_perturb_run_info'] = {
+    info = {
         key: value for key, value in backend.items() if key not in {'class_counts', 'global_counts'}}
-    result.uns['sc_perturb_run_info'].update(random_state=int(random_state), pert_key=pert_key,
-                                           control=control, split_by=split_by)
+    info.update(random_state=int(random_state), pert_key=pert_key, control=control, split_by=split_by)
+    result.uns['sc_perturb_run_info'] = json.dumps(info)
     return result
 
 
-def run_info(adata):
-    """Return method, seed and output-column names as a small diagnostic dictionary."""
-    return deepcopy(adata.uns.get('sc_perturb_run_info', {}))
+def run_info(adata, *, keep: bool = True):
+    """Return method, seed and output columns; keep=False removes the run record."""
+    key = 'sc_perturb_run_info'
+    raw = adata.uns.get(key, '{}') if keep else adata.uns.pop(key, '{}')
+    return json.loads(raw)
 
 
 def class_counts(adata):

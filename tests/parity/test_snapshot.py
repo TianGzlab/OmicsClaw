@@ -66,6 +66,18 @@ def test_summary_integers_are_exact():
     assert snapshot.compare_values({"count": 10_000_000}, {"count": 10_000_001}, "summary")
 
 
+def test_parity_uses_the_case_recording_environment(monkeypatch):
+    monkeypatch.setenv("OMP_NUM_THREADS", "7")
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "7")
+    monkeypatch.setenv("NUMBA_DISABLE_JIT", "1")
+    harmony = snapshot.case_env("sc-batch-integration", "harmony")
+    assert harmony["OMP_NUM_THREADS"] == harmony["OPENBLAS_NUM_THREADS"] == "1"
+    doublets = snapshot.case_env("sc-doublet-detection", "doubletdetection")
+    assert "OMP_NUM_THREADS" not in doublets and "OPENBLAS_NUM_THREADS" not in doublets
+    assert "NUMBA_DISABLE_JIT" not in doublets
+    assert snapshot.case_env("sc-filter", "default")["OMP_NUM_THREADS"] == "7"
+
+
 def test_api_parity_cannot_pass_without_comparable_outputs(tmp_path, monkeypatch):
     from tests.parity.test_sc_parity import compare_api
 

@@ -173,6 +173,8 @@ def umap_figure(adata, *, cluster_key="leiden"):
     return figure
 
 
-def run_info(adata):
-    """Return the TF-IDF/LSI parameters recorded on the output AnnData."""
-    return json.loads(adata.uns.get("scatac_run", "{}"))
+def run_info(adata, *, keep: bool = True):
+    """Return TF-IDF/LSI parameters; keep=False removes the run record."""
+    key = "scatac_run"
+    raw = adata.uns.get(key, "{}") if keep else adata.uns.pop(key, "{}")
+    return json.loads(raw)

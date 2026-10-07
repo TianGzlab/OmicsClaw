@@ -32,3 +32,18 @@ def test_mast_receives_expression_and_groups_without_h5ad(monkeypatch):
     monkeypatch.setattr(RScriptRunner, "run_script", run_script)
     table = load_skill("sc-de").rank_genes(adata, method="mast", groupby="group", group1="A", group2="B")
     assert table["gene"].tolist() == ["g1"]
+
+
+def test_mast_output_keeps_literal_gene_and_group_labels(monkeypatch):
+    data = ad.AnnData(np.ones((4, 2)), obs=pd.DataFrame({"group": ["01", "01", "02", "02"]}))
+
+    def run_script(self, script_name, *, args, expected_outputs, output_dir):
+        pd.DataFrame({"gene": ["NA", "001"], "group": ["01", "02"],
+                      "pvalue": [np.nan, 0.2], "padj": [np.nan, 0.2], "logFC": [1., 2.]}).to_csv(
+                          output_dir / "mast_results.csv", index=False)
+
+    monkeypatch.setattr(RScriptRunner, "run_script", run_script)
+    table = load_skill("sc-de").rank_genes(data, method="mast", groupby="group", group1="01", group2="02")
+    assert table["gene"].tolist() == ["NA", "001"]
+    assert table["group"].tolist() == ["01", "02"]
+    assert pd.isna(table.iloc[0]["pvalue"])

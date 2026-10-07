@@ -114,6 +114,7 @@ jobs:
           skills/singlecell/scrna/sc-multi-count/tests
           skills/singlecell/scatac/scatac-preprocessing/tests
           skills/singlecell/scrna/sc-fastq-qc/tests/test_fastqc_paths.py
+          tests/sdk/notebook/test_run_diagnostics.py
           -m "not demo and not slow and not cli_subprocess"
           -p no:cacheprovider
       - name: Install base R for step execution tests

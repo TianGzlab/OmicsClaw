@@ -1,12 +1,15 @@
 """TF-target inference, optional motif pruning and explicit regulon scoring."""
 from __future__ import annotations
 
+import logging
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 from skills.singlecell._lib import grn as methods
 
 __all__ = ["infer_adjacencies", "run_info", "prune_regulons", "regulons_from_adjacencies",
            "score_regulons", "regulon_heatmap_figure"]
+logger = logging.getLogger(__name__)
 
 
 def infer_adjacencies(adata, *, tfs, method: str = "grnboost2", layer: str | None = None,
@@ -16,7 +19,7 @@ def infer_adjacencies(adata, *, tfs, method: str = "grnboost2", layer: str | Non
     grnboost2 retains the CLI's fallback to absolute Spearman correlation
     when its backend fails or returns no edges. Correlation excludes supplied
     TFs from candidate targets and keeps n_top targets per TF. No motif
-    validation occurs here; run_info reports any fallback.
+    validation occurs here; a warning and run_info report any fallback.
 
     :param tfs: TF names; only names present in the selected matrix are used.
     :param method: grnboost2 (default) or correlation.
@@ -46,6 +49,7 @@ def infer_adjacencies(adata, *, tfs, method: str = "grnboost2", layer: str | Non
         if result is None or len(result) == 0:
             reason = reason or "GRNBoost2 returned empty results"
             method = "correlation"
+            logger.warning("grnboost2 fell back to correlation: %s", reason)
     if method == "correlation":
         result = methods.run_correlation_grn(expression, available, method="spearman", n_top=n_top)
     result.attrs["run_info"] = {"requested_method": requested, "executed_method": method,
@@ -54,9 +58,11 @@ def infer_adjacencies(adata, *, tfs, method: str = "grnboost2", layer: str | Non
     return result
 
 
-def run_info(adjacencies: pd.DataFrame) -> dict:
-    """Return a copy of the inference backend and fallback record from DataFrame attrs."""
-    return dict(adjacencies.attrs.get("run_info", {}))
+def run_info(adjacencies: pd.DataFrame, *, keep: bool = True) -> dict:
+    """Return an independent backend/fallback record; keep=False removes it from attrs."""
+    value = (adjacencies.attrs.get("run_info", {}) if keep
+             else adjacencies.attrs.pop("run_info", {}))
+    return deepcopy(value)
 
 
 def prune_regulons(adjacencies: pd.DataFrame, *, database_glob: str, motif_annotations: str,

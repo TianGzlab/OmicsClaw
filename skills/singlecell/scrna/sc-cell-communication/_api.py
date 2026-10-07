@@ -855,6 +855,7 @@ def interaction_heatmap_figure(table: pd.DataFrame):
     return fig
 
 
-def run_info(table: pd.DataFrame) -> dict:
-    """Return backend provenance and significance semantics without result tables."""
-    return deepcopy(table.attrs[_RUN_KEY])
+def run_info(table: pd.DataFrame, *, keep: bool = True) -> dict:
+    """Return backend provenance; keep=False removes the table's run record."""
+    info = table.attrs.get(_RUN_KEY, {}) if keep else table.attrs.pop(_RUN_KEY, {})
+    return deepcopy(info)

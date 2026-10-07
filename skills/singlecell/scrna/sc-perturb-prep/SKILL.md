@@ -86,9 +86,9 @@ Return a gene-expression AnnData with assignments on matching cells.
 The input is unchanged. Gene features and the expression matrix are
 canonicalized using the single-cell input contract; no pertpy is needed.
 
-### `run_info(adata)`
+### `run_info(adata, *, keep: bool=True)`
 
-Return a copy of preparation counts, feature types and input provenance.
+Return preparation provenance; keep=False removes the run record.
 
 ### `assignment_summary(adata)`
 

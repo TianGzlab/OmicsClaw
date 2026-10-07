@@ -353,7 +353,8 @@ def _run_de_mast(adata, *, groupby: str, group1: str | None, group2: str | None)
             expected_outputs=["mast_results.csv"],
             output_dir=output_dir,
         )
-        full_df = pd.read_csv(output_dir / "mast_results.csv")
+        full_df = pd.read_csv(output_dir / "mast_results.csv",
+                              converters={"gene": str, "group": str, "comparison": str})
     n_groups = full_df["group"].nunique() if "group" in full_df.columns else 0
     return full_df, {
         "method": "mast",

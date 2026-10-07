@@ -98,6 +98,38 @@ def test_missing_backend_names_overlay_install(monkeypatch):
         load_skill('sc-batch-integration').integrate(adata)
 
 
+def test_bbknn_handoff_preserves_the_corrected_graph(monkeypatch):
+    import scanpy as sc
+
+    rng = np.random.default_rng(7)
+    data = ad.AnnData(rng.uniform(size=(60, 20)))
+    data.obs['batch'] = ['a'] * 30 + ['b'] * 30
+    data.var['highly_variable'] = True
+    data.obsm['X_pca'] = rng.normal(size=(60, 8))
+
+    def bbknn(adata, **kwargs):
+        sc.pp.neighbors(adata, use_rep='X_pca', n_neighbors=8, random_state=7)
+
+    monkeypatch.setitem(sys.modules, 'bbknn', types.SimpleNamespace(bbknn=bbknn))
+    integration = load_skill('sc-batch-integration')
+    integration.integrate(data, method='bbknn')
+    graph = data.obsp['connectivities'].copy()
+    neighbors = data.uns['neighbors'].copy()
+    info = integration.run_info(data)['summary']
+    assert info['recommended_use_existing_graph'] is True
+    load_skill('sc-clustering').cluster(data, use_existing_graph=info['recommended_use_existing_graph'])
+    assert (data.obsp['connectivities'] != graph).nnz == 0
+    assert data.uns['neighbors'] == neighbors
+    assert 'leiden' in data.obs and 'X_umap' in data.obsm
+
+
+def test_existing_graph_requires_a_complete_graph():
+    data = ad.AnnData(np.ones((10, 6)))
+    data.obsm['X_pca'] = np.ones((10, 3))
+    with pytest.raises(ValueError, match='existing.*graph'):
+        load_skill('sc-clustering').cluster(data, use_existing_graph=True)
+
+
 def test_r_umap_handoff_stays_outside_run_info(monkeypatch):
     from pathlib import Path
     from skills._sdk.r_script_runner import RScriptRunner

@@ -620,7 +620,8 @@ def main():
     effective_params = build_effective_params(method, args)
     public_params = build_public_params(effective_params)
 
-    adata = load_skill(SKILL_NAME).preprocess(
+    library = load_skill(SKILL_NAME)
+    adata = library.preprocess(
         adata,
         min_peaks=int(effective_params["min_peaks"]),
         min_cells=int(effective_params["min_cells"]),
@@ -641,6 +642,7 @@ def main():
 
     store_analysis_metadata(adata, SKILL_NAME, method, effective_params)
     output_h5ad = output_dir / "processed.h5ad"
+    library.run_info(adata, keep=False)
     save_h5ad(adata, output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 

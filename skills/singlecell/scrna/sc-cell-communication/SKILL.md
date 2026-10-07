@@ -199,8 +199,8 @@ Return copies of backend-specific tables, including optional R summaries.
 
 Return a sender-by-receiver mean-score heatmap without writing files.
 
-### `run_info(table: pd.DataFrame) -> dict`
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
 
-Return backend provenance and significance semantics without result tables.
+Return backend provenance; keep=False removes the table's run record.
 
 <!-- api:end -->

@@ -47,7 +47,7 @@ Return TF, target and importance columns using the caller's TF list.
 grnboost2 retains the CLI's fallback to absolute Spearman correlation
 when its backend fails or returns no edges. Correlation excludes supplied
 TFs from candidate targets and keeps n_top targets per TF. No motif
-validation occurs here; run_info reports any fallback.
+validation occurs here; a warning and run_info report any fallback.
 
 :param tfs: TF names; only names present in the selected matrix are used.
 :param method: grnboost2 (default) or correlation.
@@ -58,9 +58,9 @@ validation occurs here; run_info reports any fallback.
 :returns: A new DataFrame; input AnnData is not modified.
 :raises ValueError: The method or budget is invalid, or no TF overlaps.
 
-### `run_info(adjacencies: pd.DataFrame) -> dict`
+### `run_info(adjacencies: pd.DataFrame, *, keep: bool=True) -> dict`
 
-Return a copy of the inference backend and fallback record from DataFrame attrs.
+Return an independent backend/fallback record; keep=False removes it from attrs.
 
 ### `prune_regulons(adjacencies: pd.DataFrame, *, database_glob: str, motif_annotations: str, n_top: int=50, rank_threshold: int=5000, auc_threshold: float=0.05, nes_threshold: float=3.0, n_jobs: int=4) -> list[dict]`
 
@@ -100,7 +100,7 @@ Return a score heatmap, optionally averaged over aligned cell groups.
 `infer_adjacencies` defaults to GRNBoost2, with `random_state=42` and
 `n_jobs=4`. Its legacy fallback is absolute Spearman correlation, retaining
 `n_top=50` targets per TF. `run_info(edges)` records the actual method and
-fallback reason. `method="correlation"` runs directly without arboreto.
+fallback reason, also emitted as a warning. `method="correlation"` runs directly without arboreto.
 
 The simplified path now respects the caller's TF list. Correlation gives
 co-expression candidates, not validated regulatory edges.
@@ -116,16 +116,16 @@ CLI. Mean expression is not AUCell and has no enrichment p-value.
 ## Gotchas
 
 - Inference selects an explicit layer, else counts, aligned raw, then X.
-  Mean scoring uses X; verify its normalization separately (`_api.py:12`, `_api.py:92`).
+  Mean scoring uses X; verify its normalization separately (`_api.py:15`, `_api.py:98`).
 - `run_info` is stored in DataFrame attrs; CSV does not preserve attrs.
-  Save the diagnostics separately when exporting edges (`_api.py:57`).
+  Save the diagnostics separately when exporting edges (`_api.py:61`).
 - GRNBoost2/backend failure can trigger correlation; inspect the record.
   The full pySCENIC path also needs external resources and was not validated
-  merely by running the correlation example (`_api.py:62`).
+  merely by running the correlation example (`_api.py:68`).
 - The CLI preserves legacy `grn_auc_matrix.csv` and `regulon_<TF>` names
   for compatibility even for mean scores. Check `result.json["data"]["scoring_method"]`.
 - Correlation targets exclude the TFs supplied in the same call.
-  No TF overlap raises an error in the API (`_api.py:12`).
+  No TF overlap raises an error in the API (`_api.py:15`).
 
 ## Inputs & Outputs
 

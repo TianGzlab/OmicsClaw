@@ -159,8 +159,8 @@ an empty success result. This function does not apply a minimum-count filter.
 
 Return a sample-by-cell-type proportion heatmap without writing files.
 
-### `run_info(table: pd.DataFrame) -> dict`
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
 
-Return the requested method, executed backend, fallback reason and seed.
+Return backend and seed diagnostics; keep=False removes the table's run record.
 
 <!-- api:end -->

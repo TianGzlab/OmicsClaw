@@ -4,6 +4,20 @@ import pandas as pd
 from skills._sdk.notebook import load_skill
 
 
+def test_named_gene_set_library_passes_species(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    calls = []
+
+    def get_library(*, name, organism):
+        calls.append((name, organism))
+        return {"pathway": ["GENE1"]}
+
+    monkeypatch.setitem(sys.modules, "gseapy", SimpleNamespace(get_library=get_library))
+    assert load_skill("sc-pathway-scoring").load_gene_sets("kegg", species="mouse") == {"pathway": ["GENE1"]}
+    assert calls == [("KEGG_2021_Mouse", "Mouse")]
+
+
 def test_scores_preserve_cells_and_input():
     api = load_skill('sc-pathway-scoring')
     data = ad.AnnData(np.random.default_rng(2).uniform(size=(20, 12)), var=pd.DataFrame(index=[f'g{i}' for i in range(12)]))

@@ -531,7 +531,7 @@ def main() -> None:
     expression_source = info["expression_source"]
     adata = api.attach_scores(adata, scores_df)
     score_columns = adata.uns["sc_pathway_scoring"]["score_columns"]
-    adata.uns.pop("omicsclaw_sc_pathway_scoring_run", None)
+    api.run_info(adata, keep=False)
     table_summary = api.score_summary(adata, scores_df, groupby=resolved_groupby, top_pathways=args.top_pathways)
     summary = {
         "method": method,

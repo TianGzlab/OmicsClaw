@@ -88,6 +88,8 @@ def sample_composition_figure(adata, *, sample_key="sample_id"):
     return figure
 
 
-def run_info(adata):
-    """Return merge diagnostics stored on the output AnnData."""
-    return json.loads(adata.uns.get("sc_multi_count_run", "{}"))
+def run_info(adata, *, keep: bool = True):
+    """Return merge diagnostics; keep=False removes the run record."""
+    key = "sc_multi_count_run"
+    raw = adata.uns.get(key, "{}") if keep else adata.uns.pop(key, "{}")
+    return json.loads(raw)

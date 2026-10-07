@@ -668,6 +668,7 @@ def run_velocity_analysis(
     n_jobs: int = 4,
     copy: bool = False,
     random_state: int | None = None,
+    strict: bool = False,
 ) -> dict[str, Any] | None:
     """Run scVelo RNA velocity analysis.
 
@@ -684,6 +685,9 @@ def run_velocity_analysis(
     random_state : int or None
         Build seeded neighbors before moments when supplied; None retains
         the existing caller's neighbor behavior.
+    strict : bool
+        Reject tiny inputs and propagate graph/latent-time failures instead
+        of creating placeholders. False preserves existing legacy callers.
 
     Returns
     -------
@@ -711,6 +715,8 @@ def run_velocity_analysis(
     # Tiny toy matrices can break neighbor graph construction in some scanpy/scvelo combos.
     # Provide a deterministic fallback so method-level smoke/real-min tests remain runnable.
     if int(adata.n_obs) < 5 or int(adata.n_vars) < 5:
+        if strict:
+            raise ValueError("scVelo fitting requires at least five cells and five genes; tiny-input placeholders are disabled")
         logger.warning("Tiny velocity input detected (%s cells x %s genes); using lightweight fallback path.", adata.n_obs, adata.n_vars)
         spliced = adata.layers.get("spliced")
         unspliced = adata.layers.get("unspliced")
@@ -803,6 +809,8 @@ def run_velocity_analysis(
         _vg_jobs = 1 if is_tiny_input else None
         scv.tl.velocity_graph(adata, n_jobs=_vg_jobs)
     except (ValueError, IndexError) as exc:
+        if strict:
+            raise RuntimeError(f"scVelo velocity graph computation failed: {exc}") from exc
         logger.warning(
             "velocity_graph failed (%s). Building identity placeholder so downstream code can continue.",
             exc,
@@ -821,6 +829,8 @@ def run_velocity_analysis(
         try:
             scv.tl.latent_time(adata)
         except Exception as exc:
+            if strict:
+                raise RuntimeError(f"scVelo latent-time computation failed: {exc}") from exc
             logger.warning("latent_time computation failed (%s); assigning uniform pseudotime.", exc)
             adata.obs["latent_time"] = np.linspace(0.0, 1.0, int(adata.n_obs), dtype=np.float32)
         result["latent_time"] = adata.obs["latent_time"].values.copy()

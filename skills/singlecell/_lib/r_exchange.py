@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import gzip
+import csv
 
 import pandas as pd
 from scipy import sparse
@@ -34,9 +35,10 @@ def write_matrix_exchange(adata, folder: Path, *, obs_columns: list[str] | None 
             mmwrite(stream, sparse.coo_matrix(adata.X.T))
     else:
         mmwrite(folder / "matrix.mtx", sparse.coo_matrix(adata.X.T))
-    pd.Series(adata.obs_names).to_csv(folder / f"barcodes.tsv{suffix}", sep="\t", index=False, header=False)
+    pd.Series(adata.obs_names).to_csv(folder / f"barcodes.tsv{suffix}", sep="\t", index=False, header=False,
+                                    quoting=csv.QUOTE_NONE)
     pd.DataFrame({"id": adata.var_names, "name": adata.var_names, "type": "Gene Expression"}).to_csv(
-        folder / f"features.tsv{suffix}", sep="\t", index=False, header=False,
+        folder / f"features.tsv{suffix}", sep="\t", index=False, header=False, quoting=csv.QUOTE_NONE,
     )
     metadata = adata.obs if obs_columns is None else adata.obs.loc[:, obs_columns]
     metadata.to_csv(folder / "obs.csv", index_label="cell_id")

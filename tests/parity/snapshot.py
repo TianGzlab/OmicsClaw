@@ -35,6 +35,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).resolve().parent / "golden"
 RTOL = 1e-6
+_THREAD_VARIABLES = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS")
 
 @dataclass(frozen=True)
 class Case:
@@ -48,6 +49,7 @@ class Case:
     args: tuple[str, ...]
     exclude: dict[str, str] = field(default_factory=dict)
     input: Callable[[Path], None] | None = None
+    environment: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -163,7 +165,9 @@ REGISTRY = {
         "default": Case(("--demo",)), "lsi20": Case(("--demo", "--n-lsi", "20")),
     }),
     "sc-batch-integration": Skill("skills/singlecell/scrna/sc-batch-integration/sc_integrate.py", "api_sc_batch_integration", {
-        "harmony": Case(("--method", "harmony"), input=_integration_input),
+        # M2's baseline script set these to one; BLAS threading changes Harmony metrics.
+        "harmony": Case(("--method", "harmony"), input=_integration_input,
+                        environment={key: "1" for key in (*_THREAD_VARIABLES, "NUMEXPR_NUM_THREADS")}),
         "scanorama": Case(("--method", "scanorama"), input=_integration_input),
     }),
     "sc-enrichment": Skill("skills/singlecell/scrna/sc-enrichment/sc_enrichment.py", "api_sc_enrichment", {
@@ -174,7 +178,10 @@ REGISTRY = {
         "default": Case(("--demo",)), "human": Case(("--demo", "--species", "human")),
     }),
     "sc-doublet-detection": Skill("skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py", "api_sc_doublet_detection", {
-        "default": Case(("--demo",)), "doubletdetection": Case(("--demo", "--method", "doubletdetection")),
+        "default": Case(("--demo",)),
+        # Old and new CLIs agree with the baseline when its thread overrides are absent.
+        "doubletdetection": Case(("--demo", "--method", "doubletdetection"),
+                                  environment={key: None for key in _THREAD_VARIABLES}),
     }),
     "sc-ambient-removal": Skill("skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py", "api_sc_ambient_removal", {
         "default": Case(("--demo",)), "tenth": Case(("--demo", "--contamination", "0.1")),
@@ -222,6 +229,17 @@ def child_env() -> dict[str, str]:
     return env
 
 
+def case_env(skill: str, case: str) -> dict[str, str]:
+    """Match explicit environment constraints of the recorded case."""
+    env = child_env()
+    for key, value in REGISTRY[skill].cases[case].environment.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    return env
+
+
 def case_input(skill: str, case: str, scratch: Path) -> Path | None:
     """Use the recorded input, or generate it once for a new recording."""
     entry = REGISTRY[skill].cases[case]
@@ -242,7 +260,7 @@ def case_input(skill: str, case: str, scratch: Path) -> Path | None:
 def run_cli(skill: str, case: str, output: Path, *, python: str | None = None,
             input_path: Path | None = None) -> subprocess.CompletedProcess:
     """Run *skill*'s CLI for *case* into *output* with the given interpreter (default: this one)."""
-    env = child_env()
+    env = case_env(skill, case)
     entry = REGISTRY[skill]
     source = input_path or case_input(skill, case, output.parent / "input")
     args = list(entry.cases[case].args)
@@ -572,6 +590,8 @@ def record(skill: str, case: str) -> Path:
         "runs": 2, "deterministic": not differences, "repeat_differences": differences,
         "uncertainty_reason": "; ".join(differences) if differences else None,
         "input_sha256": input_hash, "exclude": REGISTRY[skill].cases[case].exclude,
+        "environment": {key: case_env(skill, case).get(key)
+                        for key in (*_THREAD_VARIABLES, "NUMEXPR_NUM_THREADS", "PYTHONHASHSEED")},
     }
     (target / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     return target

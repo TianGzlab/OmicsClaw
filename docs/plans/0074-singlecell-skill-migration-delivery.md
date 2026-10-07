@@ -94,3 +94,23 @@ sc-multi-count、scatac-preprocessing 完成 API、CLI、示例及输出文档�
 多样本 demo 原本忽略第二用例的 --sample-id，因此不能把它当作不同标签算法的覆盖；公共 API 测试另行检查显式 ID、既有标签、特征对齐和计数守恒。ATAC 10x 读取使用 gex_only=False 并保留 Peaks；真实微型 multiome H5 测试确认不混入 RNA。支持 dense 输入不改变旧 sparse demo 的数值。
 
 四个旧用例双录均确定，CLI/API parity 8 passed/63.96 秒。两个示例 19.17 秒，干净 CI venv 中 26.63 秒；ATAC 恢复合成数据三组（ARI > 0.9），不是生物学验证。五个技能完整测试 30 passed/158.50 秒，包含共享 upstream 的四个调用者。该轮 GUARDS 811 passed、6 skipped、1 xpassed，五个失败均为 M6 施工中的 API 段/名单，不能算整批全绿。
+
+## 整批审核与回归
+
+实现检查点为 `239fe4a8`。两个未参与实现的 reviewer 独立审核：Standards 首轮 5 项、Spec 首轮 4 项，有三项重合。问题、修复和证据分轴保留在 [实现审核](0074-singlecell-skill-migration-implementation-review.md)，不是用一次总评覆盖另一轴。
+
+修复后的干净轻环境再次跑完 26 个示例（217.10 秒）；真实 CPU Mixscape 示例另跑通过（4.88 秒）。轻 CI 的精确测试选择在禁止 IP 网络连接和技能 CLI 调用的 audit hook 下为 177 passed、3 skipped、62 deselected（193.06 秒）；本机 Unix socket 留给 scVelo 的 multiprocessing。最初的探针错误地取消了 pytest 的 importlib 模式、又拦住 Unix socket，已修正探针，未为此改业务实现。
+
+框架回归为 5,783 passed、16 skipped、3 xfailed、2 failed（163.21 秒）。两条失败是 `tests/entry/test_cli_activity.py` 的 `test_c1_controls_and_format_characters_never_reach_the_terminal` 和 `test_what_a_tool_says_survives_its_own_tool_start`；在干净基准 worktree `/tmp/omicsclaw-0074-baseline.67pGE6` 上同样失败，未用本次变更掩盖。GUARDS 整组为 821 passed、7 skipped、1 xpassed（125.39 秒）；其中新增诊断测试在没有 Scanpy 的轻框架环境跳过，在科学环境和轻 CI 单独实跑。审核后真实 R/MAST/步骤测试 33 passed（71.67 秒）。
+
+首轮全量基础环境 parity 为 90 passed、10 failed。六项失败是新增防线发现原 API 比较没有实际数值：standardize、ambient 补上与旧 CLI 摘要的数值核对，in-silico 按基因对齐真实分数后，六项全部通过（18.64 秒）。另外四项源于基线线程环境未固定：Harmony 原录制脚本设置五种线程变量为 1；DoubletDetection 原基线没有四种线程覆盖。对同一 PBMC 输入，旧、新 DoubletDetection 在无覆盖时各两次均为 37 个双细胞、所有表格 exact 相等；线程数为 2 时旧、新均为 41，表格也 exact 相等。旧代码自己即可重现 2,687 个分数和六个分类的差异，不能把它算成迁移数值回归。现在 CLI/API 共用各用例明确声明的环境，新录制 metadata 记录线程值；没有改写旧 golden。相关重跑结果待收齐。
+
+本节原始日志集中在 `/tmp/omicsclaw-0074-final.nBqCmC/`。变更过的 clustering、pathway、gene-programs、multi-count、ATAC 的 20 项 parity 已再次通过（169.82 秒）；pertpy/prep 八项通过（34.04 秒），velocity 四项通过（58.96 秒）。
+
+## M9：真实模型验收进行中
+
+首轮课题 `/tmp/oc0074-e2e/project` 的四个模块均已 ACCEPTED/frozen。模块 01–03 只调用函数库；模块 04 记录 R 4.3.3、Seurat 5.3.0、SeuratObject 5.2.0，五个 R cell 均执行。独立副本单独运行 R 后，两张 CSV 与原件逐值且逐字节一致；修改模块 03 的 marker 生成步骤并重跑后，模块 04 的 R 步骤明确显示 `input changed`。
+
+这一轮只通过 5/6 项验收：主 agent 读了三次 SDK 源码，并为修正审核格式改写了 reviewer 回复，违反约定。这些行为保留在 `interventions.md` 和 `audit.json`，不把最终四个 ACCEPTED 当作整体验收通过。首轮共 100 次主线、87 次 reviewer 模型调用，六次真实审查，合计 2,182 秒。
+
+全新课题 `/tmp/oc0074-e2e-clean.OXUCNs/project`、会话 `E2E-0074-CLEAN` 正在重跑。实施者只给任务、缓存路径、离线富集偏好和原样保存审核的规则，没有替模型写步骤或提供结果。最终调用数、源码读取数和六项验收待完成后记录。sandbox 和真实 GitHub Actions 首跑仍留待 owner 的机器与远端权限验证。

@@ -516,7 +516,7 @@ def load_gene_sets(source, *, species: str = 'human') -> dict[str, list[str]]:
         if path.suffix.lower() == '.json':
             return {str(k): list(map(str, v)) for k, v in json.loads(path.read_text()).items()}
         return _read_gene_sets_gmt(path)
-    return _fetch_gene_sets_from_library(str(source), species)[0]
+    return _fetch_gene_sets_from_library(str(source), species=species)[0]
 
 
 def score_gene_sets(adata, gene_sets, *, method: str = 'aucell_r',
@@ -592,8 +592,10 @@ def score_distribution_figure(scores: pd.DataFrame):
     return fig
 
 
-def run_info(result) -> dict:
-    """Return the scoring method, seed, feature source and skipped sets."""
+def run_info(result, *, keep: bool = True) -> dict:
+    """Return scoring provenance; keep=False removes the AnnData or table run record."""
     if hasattr(result, 'uns'):
-        return json.loads(result.uns[_RUN_KEY])
-    return deepcopy(result.attrs[_RUN_KEY])
+        raw = result.uns.get(_RUN_KEY, '{}') if keep else result.uns.pop(_RUN_KEY, '{}')
+        return json.loads(raw)
+    info = result.attrs.get(_RUN_KEY, {}) if keep else result.attrs.pop(_RUN_KEY, {})
+    return deepcopy(info)

@@ -88,9 +88,10 @@ def sctenifoldknk(adata, *, ko_gene, qc=False, qc_min_lib_size=0, qc_min_cells=1
     return result
 
 
-def run_info(table):
-    """Return method, matrix source and interpretation from a returned result table."""
-    return deepcopy(table.attrs.get('run_info', {}))
+def run_info(table, *, keep: bool = True):
+    """Return method and interpretation; keep=False removes the table's run record."""
+    info = table.attrs.get('run_info', {}) if keep else table.attrs.pop('run_info', {})
+    return deepcopy(info)
 
 
 def top_perturbed_genes(table, *, n_top=15):

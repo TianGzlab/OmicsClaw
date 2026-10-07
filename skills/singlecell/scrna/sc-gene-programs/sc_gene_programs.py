@@ -435,7 +435,7 @@ def main() -> int:
         random_state=args.seed, n_iter=args.n_iter, layer=args.layer,
         top_genes=args.top_genes,
     )
-    result = api.run_info(adata)
+    result = api.run_info(adata, keep=False)
     args.method = result["executed_method"]
     usage_df = pd.DataFrame(adata.obsm["X_gene_programs"], index=adata.obs_names,
                             columns=adata.uns["gene_programs"]["program_names"])
@@ -512,7 +512,7 @@ def main() -> int:
 
     # ---- Save processed.h5ad ----
     output_h5ad = output_dir / "processed.h5ad"
-    for key in ("gene_program_weights", "gene_program_top_genes", "gene_program_tpm", "omicsclaw_sc_gene_programs_run"):
+    for key in ("gene_program_weights", "gene_program_top_genes", "gene_program_tpm"):
         adata.uns.pop(key, None)
     save_h5ad(adata, output_h5ad)
     logger.info("Saved processed object to %s", output_h5ad)

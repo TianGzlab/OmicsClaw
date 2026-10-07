@@ -155,6 +155,8 @@ def integrate(
         "requested_method": requested_method, "executed_method": method,
         "fallback_used": requested_method != method, "n_cells": int(adata.n_obs),
         "recommended_next_skill": "sc-clustering", "recommended_use_rep": key}
+    if method == "bbknn":
+        summary["recommended_use_existing_graph"] = True
     if fallback_reason:
         summary["fallback_reason"] = fallback_reason
     adata.uns[_RUN_KEY] = json.dumps({"summary": summary, "random_state": random_state})

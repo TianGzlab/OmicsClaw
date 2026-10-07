@@ -152,8 +152,8 @@ Return Pearson correlations between per-cell program usages.
 
 Return a heatmap figure of cells by program usage, without writing files.
 
-### `run_info(adata) -> dict`
+### `run_info(adata, *, keep: bool=True) -> dict`
 
-Return requested and executed methods, fallback reason and solver diagnostics.
+Return methods and solver diagnostics; keep=False removes the run record.
 
 <!-- api:end -->

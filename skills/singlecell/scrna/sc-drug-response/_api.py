@@ -126,9 +126,10 @@ def cadrres(adata, *, cluster_key, model_dir, drug_db="gdsc", n_drugs=10):
     return result
 
 
-def run_info(table):
-    """Return score-column and interpretation metadata from a result table."""
-    return deepcopy(table.attrs.get('run_info', {}))
+def run_info(table, *, keep: bool = True):
+    """Return score interpretation; keep=False removes the table's run record."""
+    info = table.attrs.get('run_info', {}) if keep else table.attrs.pop('run_info', {})
+    return deepcopy(info)
 
 
 def top_drugs(table, *, n_top=10):

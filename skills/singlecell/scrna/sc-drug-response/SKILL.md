@@ -89,9 +89,9 @@ model_dir or under the home directory. Models are not bundled or downloaded;
 upstream download locations have not been validated. Temporary predictions
 do not modify model_dir. Score units and direction depend on the model.
 
-### `run_info(table)`
+### `run_info(table, *, keep: bool=True)`
 
-Return score-column and interpretation metadata from a result table.
+Return score interpretation; keep=False removes the table's run record.
 
 ### `top_drugs(table, *, n_top=10)`
 

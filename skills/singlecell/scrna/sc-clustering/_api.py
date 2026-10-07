@@ -45,6 +45,7 @@ def cluster(
     adata,
     *,
     use_rep: str | None = None,
+    use_existing_graph: bool = False,
     n_neighbors: int = 15,
     n_pcs: int = 50,
     embedding: str = "umap",
@@ -70,6 +71,10 @@ def cluster(
         present. Pass ``X_harmony`` or ``X_scvi`` after batch integration.
     :param n_neighbors: Neighbours per cell in the graph. Default 15, scanpy's default.
         Larger values give smoother, coarser structure.
+    :param use_existing_graph: Keep the graph in ``uns['neighbors']`` and ``obsp``
+        instead of rebuilding it. Default False; set True after BBKNN. Graph
+        construction parameters are then ignored; UMAP and diffusion maps use
+        the retained graph, while t-SNE and PHATE still use ``use_rep``.
     :param n_pcs: Components of ``use_rep`` to use. Default 50; pick it from
         sc-preprocessing's ``pca_variance_table`` (the elbow) when the data are small.
     :param embedding: ``"umap"`` (default), ``"tsne"``, ``"diffmap"`` or ``"phate"``.
@@ -97,6 +102,7 @@ def cluster(
     adata, keys = _run_clustering(
         adata,
         use_rep=rep,
+        use_existing_graph=use_existing_graph,
         embedding_method=embedding,
         n_neighbors=n_neighbors,
         n_pcs=n_pcs,
@@ -121,6 +127,7 @@ def cluster(
     )
     info = {
         "use_rep": rep,
+        "used_existing_graph": use_existing_graph,
         "cluster_key": keys["cluster_key"],
         "embedding_key": keys["embedding_key"],
         "input_contract": input_contract,
@@ -260,6 +267,7 @@ def _run_clustering(
     adata,
     *,
     use_rep: str,
+    use_existing_graph: bool = False,
     embedding_method: str = "umap",
     n_neighbors: int = 15,
     n_pcs: int = 50,
@@ -274,14 +282,19 @@ def _run_clustering(
     phate_decay: int = 40,
     random_state: int = 0,
 ) -> tuple[object, dict]:
-    sc_dimred_utils.build_neighbor_graph(
-        adata,
-        n_neighbors=n_neighbors,
-        n_pcs=n_pcs,
-        use_rep=use_rep,
-        random_state=random_state,
-        inplace=True,
-    )
+    if use_existing_graph:
+        neighbors = adata.uns.get("neighbors", {})
+        if not neighbors or neighbors.get("connectivities_key", "connectivities") not in adata.obsp:
+            raise ValueError("use_existing_graph requires an existing neighbor graph")
+    else:
+        sc_dimred_utils.build_neighbor_graph(
+            adata,
+            n_neighbors=n_neighbors,
+            n_pcs=n_pcs,
+            use_rep=use_rep,
+            random_state=random_state,
+            inplace=True,
+        )
     cluster_key = cluster_method
     if cluster_method == "leiden":
         sc_dimred_utils.cluster_leiden(adata, resolution=resolution, key_added=cluster_key, random_state=random_state, inplace=True)

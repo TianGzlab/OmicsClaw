@@ -185,8 +185,8 @@ Return top pathways, grouped means, high fractions and long-form scores.
 
 Return a boxplot of per-cell scores without writing files.
 
-### `run_info(result) -> dict`
+### `run_info(result, *, keep: bool=True) -> dict`
 
-Return the scoring method, seed, feature source and skipped sets.
+Return scoring provenance; keep=False removes the AnnData or table run record.
 
 <!-- api:end -->

@@ -38,10 +38,11 @@ run_one <- function(expr_mat, meta, label, comparison_label) {
 tryCatch({
     counts <- as(Matrix::readMM(file.path(input_dir, "matrix.mtx")), "CsparseMatrix")
     rownames(counts) <- read.delim(file.path(input_dir, "features.tsv"), header = FALSE,
-                                  colClasses = "character", quote = "")[[1]]
+                                  colClasses = "character", quote = "", na.strings = NULL)[[1]]
     colnames(counts) <- read.delim(file.path(input_dir, "barcodes.tsv"), header = FALSE,
-                                  colClasses = "character", quote = "")[[1]]
-    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE)
+                                  colClasses = "character", quote = "", na.strings = NULL)[[1]]
+    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE,
+                     colClasses = "character", na.strings = NULL)
     stopifnot(identical(rownames(meta), colnames(counts)))
     if (!groupby %in% colnames(meta)) stop(sprintf("Column '%s' not found in metadata", groupby))
     expr_mat <- as.matrix(counts)
@@ -64,7 +65,7 @@ tryCatch({
 
     out <- do.call(rbind, results)
     rownames(out) <- NULL
-    write.csv(out, file.path(output_dir, "mast_results.csv"), quote = FALSE, row.names = FALSE)
+    write.csv(out, file.path(output_dir, "mast_results.csv"), row.names = FALSE)
 }, error = function(e) {
     cat(sprintf("ERROR: %s\n", e$message), file = stderr())
     quit(status = 1)

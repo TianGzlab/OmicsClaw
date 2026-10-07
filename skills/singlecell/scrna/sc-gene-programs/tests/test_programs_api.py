@@ -16,7 +16,7 @@ def test_programs_are_reproducible_and_do_not_mutate_input():
     assert api.run_info(result)['executed_method'] == 'nmf'
 
 
-def test_missing_cnmf_records_fallback(monkeypatch):
+def test_missing_cnmf_records_fallback(monkeypatch, caplog):
     import sys
     monkeypatch.setitem(sys.modules, 'cnmf', None)
     api = load_skill('sc-gene-programs')
@@ -25,3 +25,4 @@ def test_missing_cnmf_records_fallback(monkeypatch):
     assert info['requested_method'] == 'cnmf'
     assert info['executed_method'] == 'nmf'
     assert info['fallback_used'] and 'cnmf' in info['fallback_reason']
+    assert 'cnmf' in caplog.text.lower() and 'nmf' in caplog.text.lower()

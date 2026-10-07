@@ -37,7 +37,8 @@ aggregates. See `examples/example_step.py` for a PBMC example.
 Annotate input cells and return a new mean-expression metacell AnnData.
 
 KMeans uses the selected embedding. SEACells falls back to KMeans only
-when its package cannot be imported; runtime errors propagate. Counts
+when its package cannot be imported; a warning and run_info identify the
+fallback. Runtime errors propagate. Counts
 are averaged, not summed, using layers['counts'] when present, else X.
 Input X is preserved; obs['metacell'] receives the assignments.
 
@@ -82,7 +83,7 @@ Return a matplotlib Figure of cells per metacell.
 ## Methods and parameters
 
 `method="seacells"` retains the CLI default. If SEACells is unavailable,
-the API uses KMeans and records both methods in `run_info`. Other backend
+the API warns, uses KMeans and records both methods in `run_info`. Other backend
 errors propagate. `method="kmeans"` avoids that optional dependency.
 
 Defaults remain `use_rep="X_pca"`, `n_metacells=30`, `min_iter=10`,
@@ -94,11 +95,11 @@ the seed for SEACells.
 ## Gotchas
 
 - Aggregation takes the **mean**, not sum, of counts-layer values or X.
-  This is not sample-level pseudobulk, and grouping is not sample-aware (`_api.py:78`).
+  This is not sample-level pseudobulk, and grouping is not sample-aware (`_api.py:82`).
 - The legacy KMeans `dominant_label` uses the first obs column, not
-  `celltype_key`; that option controls SEACells' extra dominant-celltype column (`_api.py:13`).
+  `celltype_key`; that option controls SEACells' extra dominant-celltype column (`_api.py:15`).
 - `run_info(metacells)` reports fallback and expression source. Inspect
-  `aggregation="mean"` before feeding an aggregate into a count-based model (`_api.py:90`).
+  `aggregation="mean"` before feeding an aggregate into a count-based model (`_api.py:94`).
 - CLI `processed.h5ad` contains original cells plus labels.
   `tables/metacells.h5ad` is the aggregate; use it explicitly when needed.
 

@@ -5,6 +5,7 @@
 # %%
 import numpy as np
 import scanpy as sc
+from scipy import sparse
 from skills._sdk.notebook import load_demo, load_skill, write_output
 
 velocity = load_skill("sc-velocity")
@@ -20,3 +21,7 @@ diagnostics = velocity.velocity_diagnostics(adata)
 assert not diagnostics["degenerate"]
 assert diagnostics["n_velocity_genes"] > 0
 assert np.isfinite(adata.layers["velocity"]).all()
+assert velocity.run_info(adata)["placeholder_fallback_used"] is False
+assert diagnostics["fit_validation_performed"] is False
+graph = sparse.csr_matrix(adata.uns["velocity_graph"])
+assert (graph - sparse.eye(adata.n_obs, format="csr")).nnz > 0

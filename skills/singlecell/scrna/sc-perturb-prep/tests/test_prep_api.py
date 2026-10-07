@@ -52,6 +52,7 @@ def test_attach_preserves_input_and_keeps_assigned_gene_features():
     assigned, _ = api.collapse_assignments(mapping)
     result = api.attach_assignments(adata, assigned)
     assert result.shape == (2, 2)
+    assert isinstance(result.uns['sc_perturb_prep_run_info'], str)
     assert result.obs['perturbation'].tolist() == ['NT', 'WNT3']
     assert api.assignment_summary(result)['n_cells'].sum() == 2
     assert api.perturbation_counts(result)['n_cells'].sum() == 2

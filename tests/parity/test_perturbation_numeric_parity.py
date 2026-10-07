@@ -25,7 +25,7 @@ def test_corrected_tables_keep_original_numeric_scores(skill, case, surface, tmp
         result = snapshot.run_cli(skill, case, output)
     else:
         result = subprocess.run([sys.executable, '-m', 'tests.parity.api_runs', skill, case, str(output)],
-                                cwd=snapshot.REPO, env=snapshot.child_env(), capture_output=True,
+                                cwd=snapshot.REPO, env=snapshot.case_env(skill, case), capture_output=True,
                                 text=True, timeout=600, start_new_session=True)
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
     name = 'diff_regulation.csv' if skill == 'sc-in-silico-perturbation' else 'drug_rankings.csv'

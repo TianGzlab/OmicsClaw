@@ -43,30 +43,35 @@ Compute scVelo velocity in place, including its gene filtering.
 
 Both spliced and unspliced count layers are required. The shared method
 filters/normalizes expression, explicitly constructs seeded neighbors,
-computes moments, velocity and its graph, and attempts latent time in
-dynamical mode. It can remove genes from every aligned matrix.
+computes moments, velocity and its graph, plus latent time in
+dynamical mode. Fewer than five cells or genes, graph failures and
+latent-time failures raise errors; no placeholder outputs are created.
+Gene filtering modifies every aligned matrix. A failed call can leave
+partial preprocessing, so retry from a fresh input copy.
 
 :param mode: stochastic (default), steady_state or dynamical.
 :param n_jobs: Dynamics worker budget, default 4; the shared small-data
     branch uses one worker. Graph workers follow scVelo's own settings.
 :param random_state: Neighbor seed, default 0.
 :returns: The same AnnData. Inspect velocity_diagnostics before interpretation.
-:raises ValueError: Layers, mode or worker budget are invalid.
+:raises ValueError: Layers, mode, worker budget or input dimensions are invalid.
+:raises RuntimeError: Velocity graph or dynamical latent-time computation fails.
 :raises ImportError: scvelo is unavailable.
 
 ### `run_info(adata, *, keep: bool=True) -> dict`
 
-Read the mode and seed record; keep=False removes it from uns.
+Read the completed run's mode, seed and placeholder policy; empty after failure.
+
+Completion does not establish biological fit validity. keep=False removes
+the record from uns.
 
 ### `velocity_diagnostics(adata) -> dict`
 
 Return zero/NaN and expressed-velocity-gene checks, not fit validation.
 
-The shared backend can substitute an identity graph after graph failure
-or a uniform latent-time sequence after latent-time failure. Consult its
-warnings; finite velocities do not validate those substituted outputs.
-Inputs with fewer than five cells or genes use its legacy arithmetic
-toy fallback, which is not a fitted kinetics model.
+The API rejects placeholder fallbacks. For objects without a completed
+API run record, placeholder_fallback_used is unknown (None). These
+numerical checks do not establish biological fit validity.
 
 ### `velocity_summary(adata) -> pd.DataFrame`
 
@@ -106,14 +111,15 @@ the process group that may contain a notebook kernel.
   The tested CI combination is scvelo 0.3.4 with NumPy 2.0.2.
 - `velocity` can remove genes from X and all aligned layers (`_api.py:14`).
 - Inspect `velocity_diagnostics(adata)`, not just the presence of a velocity layer.
-  It detects zero/NaN output, not biological validity (`_api.py:49`).
-- The shared legacy backend can substitute an identity graph after graph
-  failure or uniform latent time after latent-time failure. Those are
-  placeholders, not recovered trajectories; check warnings (`_api.py:14`).
-- Fewer than five cells or genes use a legacy arithmetic toy fallback, not
-  a fitted kinetic model. Do not interpret it as RNA velocity (`_api.py:14`).
+  It detects zero/NaN output, not biological validity (`_api.py:61`).
+- Graph and dynamical latent-time failures raise errors with the backend
+  exception attached. The API and CLI do not replace them with identity
+  graphs or uniform sequences (`_api.py:14`).
+- Fewer than five cells or genes raise `ValueError` before fitting.
+  A failed call can leave partial preprocessing; retry from a fresh copy
+  of the input (`_api.py:14`).
 - Only dynamical mode attempts latent time. `stream_figure` requires an
-  existing display embedding such as X_umap (`_api.py:118`).
+  existing display embedding such as X_umap (`_api.py:130`).
 - Generate real splicing layers with `sc-velocity-prep`; copied or scaled
   expression layers do not supply the required kinetic signal (`_api.py:14`).
 

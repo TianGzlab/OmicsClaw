@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import numpy as np
 import pandas as pd
 from skills.singlecell._lib import metacell as methods
 
 __all__ = ["metacells", "aggregate_metacells", "run_info", "metacell_summary", "cell_to_metacell", "size_distribution_figure"]
 _RUN_KEY = "omicsclaw_sc_metacell_run"
+logger = logging.getLogger(__name__)
 
 
 def metacells(adata, *, method: str = "seacells", use_rep: str = "X_pca",
@@ -17,7 +19,8 @@ def metacells(adata, *, method: str = "seacells", use_rep: str = "X_pca",
     """Annotate input cells and return a new mean-expression metacell AnnData.
 
     KMeans uses the selected embedding. SEACells falls back to KMeans only
-    when its package cannot be imported; runtime errors propagate. Counts
+    when its package cannot be imported; a warning and run_info identify the
+    fallback. Runtime errors propagate. Counts
     are averaged, not summed, using layers['counts'] when present, else X.
     Input X is preserved; obs['metacell'] receives the assignments.
 
@@ -50,6 +53,7 @@ def metacells(adata, *, method: str = "seacells", use_rep: str = "X_pca",
         except ImportError:
             method = "kmeans"
             reason = "SEACells package is unavailable; used kmeans"
+            logger.warning(reason)
     if method == "seacells":
         if "neighbors" not in adata.uns:
             import scanpy as sc

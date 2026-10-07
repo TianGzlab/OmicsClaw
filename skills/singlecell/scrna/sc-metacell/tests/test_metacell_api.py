@@ -7,7 +7,7 @@ import sys
 from skills._sdk.notebook import load_skill
 
 
-def test_metacells_preserve_cells_and_average_counts(monkeypatch):
+def test_metacells_preserve_cells_and_average_counts(monkeypatch, caplog):
     monkeypatch.setitem(sys.modules, "SEACells", None)
     counts = np.array([[2., 4.], [4., 6.], [20., 40.], [40., 60.]])
     adata = ad.AnnData(np.log1p(counts), obs=pd.DataFrame({"type": ["a", "a", "b", "b"]}, index=list("abcd")))
@@ -24,3 +24,5 @@ def test_metacells_preserve_cells_and_average_counts(monkeypatch):
     info = api.run_info(result)
     assert info["requested_method"] == "seacells" and info["executed_method"] == "kmeans"
     assert "SEACells" in info["fallback_reason"]
+    assert any(record.levelname == "WARNING" and "SEACells" in record.message
+               and "kmeans" in record.message for record in caplog.records)

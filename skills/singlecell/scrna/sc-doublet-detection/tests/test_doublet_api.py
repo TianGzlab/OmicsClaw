@@ -52,3 +52,25 @@ def test_matrix_exchange_preserves_expression_orientation_and_metadata(tmp_path)
     frame = pd.read_csv(folder / "obs.csv", index_col=0)
     assert frame.index.tolist() == ["c2", "c1", "c3"] and list(frame) == ["group"]
     assert frame["group"].tolist() == ["B", "A", "B"]
+
+
+@pytest.mark.parametrize("names", [["001", "002"], ["NA", 'cell,"quoted"']])
+def test_r_result_preserves_text_cell_ids(monkeypatch, names):
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("doublet_identity_test", Path(__file__).parents[1] / "_api.py")
+    api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    monkeypatch.setattr(api, "validate_r_environment", lambda **kwargs: None)
+
+    def run_script(self, script_name, *, args, expected_outputs, output_dir):
+        pd.DataFrame({"doublet_score": [0.1, 0.9], "classification": ["Singlet", "Doublet"],
+                      "predicted_doublet": [False, True]}, index=names).to_csv(output_dir / expected_outputs[0])
+
+    monkeypatch.setattr(api.RScriptRunner, "run_script", run_script)
+    data = ad.AnnData(np.ones((2, 2)), obs=pd.DataFrame(index=names))
+    result = api.detect_doublets(data, method="scdblfinder")
+    assert result.obs_names.tolist() == names
+    assert result.obs["predicted_doublet"].tolist() == [False, True]
+    np.testing.assert_allclose(result.obs["doublet_score"], [0.1, 0.9])

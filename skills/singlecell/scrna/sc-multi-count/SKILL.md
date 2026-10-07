@@ -128,9 +128,9 @@ Return cell counts, median counts/features and summed UMIs for each sample.
 
 Return a Figure showing each sample's cell count; do not write it.
 
-### `run_info(adata)`
+### `run_info(adata, *, keep: bool=True)`
 
-Return merge diagnostics stored on the output AnnData.
+Return merge diagnostics; keep=False removes the run record.
 
 <!-- api:end -->
 

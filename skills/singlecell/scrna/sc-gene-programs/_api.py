@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import pandas as pd
 
 from skills.singlecell._lib.gene_programs import run_cnmf_programs, run_nmf_programs
@@ -33,6 +34,7 @@ def find_programs(adata, *, method: str = 'cnmf', n_programs: int = 6,
             import cnmf  # noqa: F401
         except ImportError as exc:
             executed, reason = 'nmf', f'cnmf unavailable: {exc}'
+            logging.getLogger(__name__).warning('%s; using sklearn NMF', reason)
     runner = run_cnmf_programs if executed == 'cnmf' else run_nmf_programs
     result = runner(work, n_programs=n_programs, seed=random_state,
                     max_iter=n_iter, layer=layer, top_genes=top_genes)
@@ -81,6 +83,7 @@ def usage_figure(adata):
     return fig
 
 
-def run_info(adata) -> dict:
-    """Return requested and executed methods, fallback reason and solver diagnostics."""
-    return json.loads(adata.uns[_RUN_KEY])
+def run_info(adata, *, keep: bool = True) -> dict:
+    """Return methods and solver diagnostics; keep=False removes the run record."""
+    raw = adata.uns.get(_RUN_KEY, '{}') if keep else adata.uns.pop(_RUN_KEY, '{}')
+    return json.loads(raw)

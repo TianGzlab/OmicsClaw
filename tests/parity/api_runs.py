@@ -10,6 +10,7 @@ out like a snapshot.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -175,7 +176,8 @@ def api_sc_enrichment(case: str) -> dict:
 
 def api_sc_standardize_input(case: str) -> dict:
     library = _load("sc-standardize-input")
-    return {"adata": library.standardize(_demo("pbmc3k_raw"), species="human" if case == "human" else "auto")}
+    adata = library.standardize(_demo("pbmc3k_raw"), species="human" if case == "human" else "auto")
+    return {"adata": adata, "summary": library.run_info(adata)}
 
 
 def api_sc_doublet_detection(case: str) -> dict:
@@ -188,7 +190,13 @@ def api_sc_doublet_detection(case: str) -> dict:
 
 def api_sc_ambient_removal(case: str) -> dict:
     library = _load("sc-ambient-removal")
-    return {"adata": library.remove_ambient(_demo("pbmc3k_raw"), contamination=0.1 if case == "tenth" else 0.05)}
+    adata = library.remove_ambient(_demo("pbmc3k_raw"), contamination=0.1 if case == "tenth" else 0.05)
+    info = library.run_info(adata)
+    return {"adata": adata, "summary": {
+        "n_cells": int(adata.n_obs), "mean_counts_before": info["mean_before"],
+        "mean_counts_after": info["mean_after"], "count_reduction_pct": info["reduction_pct"],
+        "contamination_estimate": info["contamination_estimate"], "method": info["method"],
+    }}
 
 
 def api_sc_pathway_scoring(case: str) -> dict:
@@ -424,6 +432,8 @@ def api_sc_drug_response(case: str, *, input_path=None) -> dict:
 def save(produced: dict, folder: Path) -> None:
     """Write what a runner returned in the snapshot layout."""
     folder.mkdir(parents=True, exist_ok=True)
+    if "summary" in produced:
+        (folder / "summary.json").write_text(json.dumps(produced["summary"]))
     for name, frame in produced.get("tables", {}).items():
         path = folder / "tables" / name
         path.parent.mkdir(parents=True, exist_ok=True)

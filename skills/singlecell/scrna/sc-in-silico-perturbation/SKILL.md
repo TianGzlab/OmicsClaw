@@ -90,9 +90,9 @@ Uses layers['counts'] or X without changing the input. Requires Rscript and
 the scTenifoldKnk R package; missing packages and R failures propagate.
 random_state is passed to R set.seed before fitting the network.
 
-### `run_info(table)`
+### `run_info(table, *, keep: bool=True)`
 
-Return method, matrix source and interpretation from a returned result table.
+Return method and interpretation; keep=False removes the table's run record.
 
 ### `top_perturbed_genes(table, *, n_top=15)`
 

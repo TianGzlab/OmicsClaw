@@ -44,7 +44,7 @@ A complete step that runs on demo data: `examples/example_step.py`.
 
 <!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-### `cluster(adata, *, use_rep: str | None=None, n_neighbors: int=15, n_pcs: int=50, embedding: str='umap', method: str='leiden', resolution: float=1.0, random_state: int=0, umap_min_dist: float=0.5, umap_spread: float=1.0, tsne_perplexity: float=30.0, tsne_metric: str='euclidean', diffmap_n_comps: int=15, phate_knn: int=15, phate_decay: int=40)`
+### `cluster(adata, *, use_rep: str | None=None, use_existing_graph: bool=False, n_neighbors: int=15, n_pcs: int=50, embedding: str='umap', method: str='leiden', resolution: float=1.0, random_state: int=0, umap_min_dist: float=0.5, umap_spread: float=1.0, tsne_perplexity: float=30.0, tsne_metric: str='euclidean', diffmap_n_comps: int=15, phate_knn: int=15, phate_decay: int=40)`
 
 Build the neighbour graph, cluster the cells and compute a 2-D embedding, in place.
 
@@ -57,6 +57,10 @@ records the cluster key as the primary one in the matrix contract.
     present. Pass ``X_harmony`` or ``X_scvi`` after batch integration.
 :param n_neighbors: Neighbours per cell in the graph. Default 15, scanpy's default.
     Larger values give smoother, coarser structure.
+:param use_existing_graph: Keep the graph in ``uns['neighbors']`` and ``obsp``
+    instead of rebuilding it. Default False; set True after BBKNN. Graph
+    construction parameters are then ignored; UMAP and diffusion maps use
+    the retained graph, while t-SNE and PHATE still use ``use_rep``.
 :param n_pcs: Components of ``use_rep`` to use. Default 50; pick it from
     sc-preprocessing's ``pca_variance_table`` (the elbow) when the data are small.
 :param embedding: ``"umap"`` (default), ``"tsne"``, ``"diffmap"`` or ``"phate"``.

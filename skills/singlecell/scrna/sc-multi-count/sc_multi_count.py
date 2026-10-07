@@ -374,6 +374,7 @@ def main() -> None:
 
     # Save h5ad
     output_h5ad = output_dir / "processed.h5ad"
+    library.run_info(standardized, keep=False)
     save_h5ad(standardized, output_h5ad)
     alias_paths = write_h5ad_aliases(output_h5ad, [output_dir / "standardized_input.h5ad"])
 

@@ -37,6 +37,7 @@ def test_mixscape_seed_reaches_both_backend_stages(monkeypatch):
     assert api.class_counts(result)['n_cells'].sum() == 6
     assert api.global_class_counts(result).set_index('global_class').loc['KO', 'n_cells'] == 3
     assert json.loads(json.dumps(api.run_info(result)))['random_state'] == 17
+    assert isinstance(result.uns['sc_perturb_run_info'], str)
 
 
 def test_missing_control_and_split_raise_clear_errors():

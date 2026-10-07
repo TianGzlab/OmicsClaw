@@ -170,7 +170,9 @@ def _run_r_doublet_script(
             expected_outputs=[output_csv],
             output_dir=output_dir,
         )
-        df = pd.read_csv(output_dir / output_csv, index_col=0)
+        df = pd.read_csv(output_dir / output_csv, converters={0: str})
+        df = df.set_index(df.columns[0])
+        df.index.name = None
 
     return df, source
 

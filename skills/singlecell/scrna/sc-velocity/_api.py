@@ -16,32 +16,44 @@ def velocity(adata, *, mode: str = "stochastic", n_jobs: int = 4, random_state: 
 
     Both spliced and unspliced count layers are required. The shared method
     filters/normalizes expression, explicitly constructs seeded neighbors,
-    computes moments, velocity and its graph, and attempts latent time in
-    dynamical mode. It can remove genes from every aligned matrix.
+    computes moments, velocity and its graph, plus latent time in
+    dynamical mode. Fewer than five cells or genes, graph failures and
+    latent-time failures raise errors; no placeholder outputs are created.
+    Gene filtering modifies every aligned matrix. A failed call can leave
+    partial preprocessing, so retry from a fresh input copy.
 
     :param mode: stochastic (default), steady_state or dynamical.
     :param n_jobs: Dynamics worker budget, default 4; the shared small-data
         branch uses one worker. Graph workers follow scVelo's own settings.
     :param random_state: Neighbor seed, default 0.
     :returns: The same AnnData. Inspect velocity_diagnostics before interpretation.
-    :raises ValueError: Layers, mode or worker budget are invalid.
+    :raises ValueError: Layers, mode, worker budget or input dimensions are invalid.
+    :raises RuntimeError: Velocity graph or dynamical latent-time computation fails.
     :raises ImportError: scvelo is unavailable.
     """
+    adata.uns.pop(_RUN_KEY, None)
     if not {"spliced", "unspliced"} <= set(adata.layers):
         raise ValueError("velocity requires spliced and unspliced count layers")
     if mode not in {"stochastic", "steady_state", "dynamical"} or n_jobs < 1:
         raise ValueError("invalid velocity mode or n_jobs")
     import scvelo  # noqa: F401
-    result = trajectory.run_velocity_analysis(adata, mode=mode, n_jobs=n_jobs, random_state=random_state)
+    result = trajectory.run_velocity_analysis(adata, mode=mode, n_jobs=n_jobs,
+                                             random_state=random_state, strict=True)
     if result is None:
         raise RuntimeError("scVelo did not return a velocity result")
     adata.uns[_RUN_KEY] = json.dumps({"mode": mode, "method": f"scvelo_{mode}",
-                                     "n_jobs": n_jobs, "random_state": random_state})
+                                     "n_jobs": n_jobs, "random_state": random_state,
+                                     "placeholder_fallback_used": False,
+                                     "fit_validation_performed": False})
     return adata
 
 
 def run_info(adata, *, keep: bool = True) -> dict:
-    """Read the mode and seed record; keep=False removes it from uns."""
+    """Read the completed run's mode, seed and placeholder policy; empty after failure.
+
+    Completion does not establish biological fit validity. keep=False removes
+    the record from uns.
+    """
     value = adata.uns.get(_RUN_KEY, "{}") if keep else adata.uns.pop(_RUN_KEY, "{}")
     return json.loads(value)
 
@@ -49,14 +61,14 @@ def run_info(adata, *, keep: bool = True) -> dict:
 def velocity_diagnostics(adata) -> dict:
     """Return zero/NaN and expressed-velocity-gene checks, not fit validation.
 
-    The shared backend can substitute an identity graph after graph failure
-    or a uniform latent-time sequence after latent-time failure. Consult its
-    warnings; finite velocities do not validate those substituted outputs.
-    Inputs with fewer than five cells or genes use its legacy arithmetic
-    toy fallback, which is not a fitted kinetics model.
+    The API rejects placeholder fallbacks. For objects without a completed
+    API run record, placeholder_fallback_used is unknown (None). These
+    numerical checks do not establish biological fit validity.
     """
+    checks = {"placeholder_fallback_used": run_info(adata).get("placeholder_fallback_used"),
+              "fit_validation_performed": False}
     if "velocity" not in adata.layers:
-        return {"degenerate": True, "all_zero_velocity": True, "nan_fraction": 1.0,
+        return {**checks, "degenerate": True, "all_zero_velocity": True, "nan_fraction": 1.0,
                 "n_velocity_genes": 0, "n_total_genes": int(adata.n_vars),
                 "suggested_actions": ["Velocity layer was not created — check scVelo logs above for errors",
                                       "Ensure spliced/unspliced layers have sufficient signal"]}
@@ -65,7 +77,7 @@ def velocity_diagnostics(adata) -> dict:
     all_zero = bool(np.allclose(values, 0))
     nan_frac = float(np.isnan(values).sum()) / max(values.size, 1)
     genes = int((np.abs(values).sum(axis=0) > 0).sum())
-    result = {"all_zero_velocity": all_zero, "nan_fraction": round(nan_frac, 4),
+    result = {**checks, "all_zero_velocity": all_zero, "nan_fraction": round(nan_frac, 4),
               "n_velocity_genes": genes, "n_total_genes": int(adata.n_vars),
               "degenerate": all_zero or nan_frac > 0.5 or genes == 0}
     if result["degenerate"]:
