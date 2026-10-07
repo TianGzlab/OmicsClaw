@@ -1,25 +1,10 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-└── tables/
-    ├── crosslinks.csv
-    └── inter_protein_crosslinks.csv
-```
+- tables/crosslinks.csv
+- tables/inter_protein_crosslinks.csv (when link_type exists; can be empty)
+- report.md
+- result.json
+- `demo_crosslinks.csv` is written only with `--demo`.
 
-## File contents
-
-- `tables/crosslinks.csv` — written by `struct_proteomics.py` (or its imported `_lib/` helpers).
-- `tables/inter_protein_crosslinks.csv` — written by `struct_proteomics.py` (or its imported `_lib/` helpers).
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-### Demo-only outputs
-
-- `demo_crosslinks.csv` — generated only on `--demo`.
-
-## Notes
-
-Auto-generated from `struct_proteomics.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The CLI owns these files; the library returns DataFrames. Plotting functions return
+Figures to the caller and do not add files to a CLI run.

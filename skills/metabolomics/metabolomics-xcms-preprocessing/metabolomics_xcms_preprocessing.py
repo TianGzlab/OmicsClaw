@@ -194,18 +194,20 @@ def main():
     parser.add_argument("--peakwidth-max", type=float, default=60.0)
     args = parser.parse_args()
 
+    if not args.demo:
+        raise ValueError('Only --demo simulation is implemented; process real mzML with XCMS externally')
+    if not np.isfinite(args.ppm) or args.ppm <= 0:
+        raise ValueError('ppm must be positive and finite')
+    if not 0 < args.peakwidth_min < args.peakwidth_max < 600 - args.peakwidth_min:
+        raise ValueError('peakwidth requires 0 < min < max and min + max < 600')
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     peakwidth = (args.peakwidth_min, args.peakwidth_max)
 
-    if args.demo:
-        input_files, peaks = get_demo_data()
-    else:
-        if not args.input_path:
-            raise ValueError("--input required when not using --demo")
-        input_files = [Path(p) for p in args.input_path]
-        peaks = xcms_preprocess_python(input_files, args.ppm, peakwidth)
+    input_files = [Path(f'demo_sample_{i}.mzML') for i in range(1, 6)]
+    peaks = xcms_preprocess_python(input_files, args.ppm, peakwidth)
 
     logger.info("Detected %d peaks across %d samples", len(peaks), len(input_files))
 

@@ -64,155 +64,7 @@ PTM_TARGETS = {
 }
 
 
-def generate_demo_data(output_dir: Path) -> Path:
-    """Generate realistic PTM analysis demo data.
-
-    Simulates phosphoproteomics experiment output with site localization
-    probabilities (similar to MaxQuant Phospho(STY)Sites.txt format).
-    """
-    rng = np.random.default_rng(42)
-    n_sites = 200
-
-    proteins = [f"P{i:05d}" for i in range(50)]
-    aa_pool = list("ACDEFGHIKLMNPQRSTVWY")
-
-    records = []
-    for i in range(n_sites):
-        protein = rng.choice(proteins)
-        # Generate a window sequence around the modification site
-        window_size = 15  # ±7 amino acids around the site
-        window = "".join(rng.choice(aa_pool, window_size))
-
-        ptm_type = rng.choice(
-            ["Phosphorylation", "Phosphorylation", "Phosphorylation",  # 60% phospho
-             "Acetylation", "Oxidation", "Ubiquitination", "Methylation",
-             "Deamidation"]
-        )
-
-        # Localization probability (higher is better, >0.75 is Class I)
-        loc_prob = float(rng.beta(5, 2))  # Skewed toward high confidence
-
-        # Determine the modified amino acid
-        if ptm_type == "Phosphorylation":
-            mod_aa = rng.choice(["S", "T", "Y"], p=[0.65, 0.25, 0.10])
-        elif ptm_type == "Acetylation":
-            mod_aa = "K"
-        elif ptm_type == "Oxidation":
-            mod_aa = "M"
-        elif ptm_type == "Ubiquitination":
-            mod_aa = "K"
-        elif ptm_type == "Methylation":
-            mod_aa = rng.choice(["K", "R"])
-        else:
-            mod_aa = rng.choice(["N", "Q"])
-
-        # Place the modified AA in the center of the window
-        center = window_size // 2
-        window_list = list(window)
-        window_list[center] = mod_aa
-        window = "".join(window_list)
-
-        records.append({
-            "protein": protein,
-            "position": int(rng.integers(1, 800)),
-            "amino_acid": mod_aa,
-            "ptm_type": ptm_type,
-            "localization_probability": round(loc_prob, 4),
-            "score": round(float(rng.uniform(10, 200)), 2),
-            "intensity": round(float(rng.lognormal(12, 2)), 2),
-            "window_sequence": window,
-            "peptide": "".join(rng.choice(aa_pool, rng.integers(8, 25))),
-        })
-
-    df = pd.DataFrame(records)
-    path = output_dir / "demo_ptm_sites.csv"
-    df.to_csv(path, index=False)
-    logger.info(f"Generated demo PTM data with {n_sites} sites: {path}")
-    return path
-
-
-def analyse_ptm_sites(data_path: Path, loc_threshold: float = 0.75) -> tuple[pd.DataFrame, dict]:
-    """Analyze PTM sites from identification results.
-
-    Performs:
-    1. Site classification by localization probability
-       - Class I: prob >= 0.75 (well-localized)
-       - Class II: 0.50 <= prob < 0.75
-       - Class III: prob < 0.50 (poorly localized)
-    2. PTM type distribution
-    3. Amino acid preference analysis
-    4. Motif counting (for phosphorylation)
-
-    Reference: Olsen et al. (2006) Cell 127:635-648 (Class I/II/III scheme)
-    """
-    df = pd.read_csv(data_path)
-    logger.info(f"Loaded {len(df)} PTM sites from {data_path.name}")
-
-    # Ensure required columns exist
-    required = ["protein", "ptm_type"]
-    for col in required:
-        if col not in df.columns:
-            raise ValueError(f"Missing required column: '{col}'")
-
-    # Site localization classification (Olsen et al. 2006)
-    if "localization_probability" in df.columns:
-        conditions = [
-            df["localization_probability"] >= loc_threshold,
-            df["localization_probability"] >= 0.50,
-        ]
-        choices = ["Class I", "Class II"]
-        df["site_class"] = np.select(conditions, choices, default="Class III")
-    else:
-        df["site_class"] = "Unknown"
-
-    # PTM type distribution
-    ptm_counts = df["ptm_type"].value_counts().to_dict()
-
-    # Amino acid distribution (if available)
-    aa_counts = {}
-    if "amino_acid" in df.columns:
-        aa_counts = df["amino_acid"].value_counts().to_dict()
-
-    # Class distribution
-    class_counts = df["site_class"].value_counts().to_dict()
-
-    # Per-protein PTM burden
-    ptm_per_protein = df.groupby("protein").size()
-
-    # Phosphorylation-specific analysis
-    phospho_stats = {}
-    if "Phosphorylation" in ptm_counts:
-        phospho = df[df["ptm_type"] == "Phosphorylation"]
-        if "amino_acid" in phospho.columns:
-            phospho_aa = phospho["amino_acid"].value_counts().to_dict()
-            total_phospho = len(phospho)
-            phospho_stats = {
-                "n_pSer": phospho_aa.get("S", 0),
-                "n_pThr": phospho_aa.get("T", 0),
-                "n_pTyr": phospho_aa.get("Y", 0),
-                "pct_pSer": round(phospho_aa.get("S", 0) / total_phospho * 100, 1) if total_phospho > 0 else 0,
-                "pct_pThr": round(phospho_aa.get("T", 0) / total_phospho * 100, 1) if total_phospho > 0 else 0,
-                "pct_pTyr": round(phospho_aa.get("Y", 0) / total_phospho * 100, 1) if total_phospho > 0 else 0,
-            }
-
-    stats = {
-        "n_total_sites": len(df),
-        "n_unique_proteins": df["protein"].nunique(),
-        "ptm_type_distribution": {str(k): int(v) for k, v in ptm_counts.items()},
-        "site_class_distribution": {str(k): int(v) for k, v in class_counts.items()},
-        "n_class_I": class_counts.get("Class I", 0),
-        "mean_ptm_per_protein": round(float(ptm_per_protein.mean()), 2),
-        "max_ptm_per_protein": int(ptm_per_protein.max()),
-    }
-    if aa_counts:
-        stats["amino_acid_distribution"] = {str(k): int(v) for k, v in aa_counts.items()}
-    if phospho_stats:
-        stats["phosphorylation"] = phospho_stats
-
-    return df, stats
-
-
-def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
+def write_report(output_dir: Path, stats: dict, input_file: str | None, *, loc_threshold: float = 0.75) -> None:
     """Write PTM analysis report."""
     header = generate_report_header(
         title="Post-Translational Modification Analysis Report",
@@ -240,8 +92,8 @@ def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
                         "| Class | Count | Description |",
                         "|-------|-------|-------------|"])
     class_dist = stats.get("site_class_distribution", {})
-    body_lines.append(f"| Class I | {class_dist.get('Class I', 0)} | Well-localized (prob ≥ 0.75) |")
-    body_lines.append(f"| Class II | {class_dist.get('Class II', 0)} | Moderate (0.50 ≤ prob < 0.75) |")
+    body_lines.append(f"| Class I | {class_dist.get('Class I', 0)} | Well-localized (prob >= {loc_threshold}) |")
+    body_lines.append(f"| Class II | {class_dist.get('Class II', 0)} | Moderate (0.50 <= prob < {loc_threshold}) |")
     body_lines.append(f"| Class III | {class_dist.get('Class III', 0)} | Poorly localized (prob < 0.50) |")
 
     if "phosphorylation" in stats:
@@ -260,7 +112,7 @@ def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
         "",
         "## Methodology\n",
         "- Site classification: Olsen et al. (2006) Class I/II/III scheme",
-        "- Localization probability threshold for Class I: ≥ 0.75",
+        f"- Localization probability threshold for Class I: >= {loc_threshold}",
     ])
 
     footer = generate_report_footer()
@@ -268,6 +120,8 @@ def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
 
 
 def main():
+    from skills._sdk.notebook import load_skill
+    library = load_skill("proteomics-ptm")
     parser = argparse.ArgumentParser(description="PTM Analysis")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -280,7 +134,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.demo:
-        data_path = generate_demo_data(output_dir)
+        data_path = output_dir / "demo_ptm_sites.csv"
+        library.demo_data().to_csv(data_path, index=False)
         input_file = None
     else:
         if not args.input_path:
@@ -288,7 +143,9 @@ def main():
         data_path = Path(args.input_path)
         input_file = args.input_path
 
-    result_df, stats = analyse_ptm_sites(data_path, loc_threshold=args.loc_threshold)
+    result_df = library.classify_sites(pd.read_csv(data_path), loc_threshold=args.loc_threshold)
+    diagnostics = library.run_info(result_df, keep=False)
+    stats = diagnostics.pop("summary")
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
@@ -299,8 +156,8 @@ def main():
         class_i = result_df[result_df["site_class"] == "Class I"]
         class_i.to_csv(tables_dir / "ptm_class_I_sites.csv", index=False)
 
-    write_report(output_dir, stats, input_file)
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, stats, {})
+    write_report(output_dir, stats, input_file, loc_threshold=args.loc_threshold)
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, stats, {"diagnostics": diagnostics})
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

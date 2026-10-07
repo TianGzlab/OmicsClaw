@@ -1,35 +1,14 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── tables/
-│   ├── clinical.csv
-│   ├── expr.csv
-│   ├── km_data.csv
-│   └── survival_results.csv
-└── figures/
-    └── forest_plot.png
-```
+The CLI owns these files:
 
-## File contents
+- `tables/survival_results.csv`
+- `figures/km_<gene>.png` per successful gene
+- `figures/forest_plot.png` when at least two genes succeed
+- `report.md`, `result.json`
+- `reproducibility/commands.sh`
 
-- `tables/clinical.csv` — written by `bulkrna_survival.py` (or its imported `_lib/` helpers).
-- `tables/expr.csv` — written by `bulkrna_survival.py` (or its imported `_lib/` helpers).
-- `tables/km_data.csv` — written by `bulkrna_survival.py` (or its imported `_lib/` helpers).
-- `tables/survival_results.csv` — written by `bulkrna_survival.py` (or its imported `_lib/` helpers).
-- `figures/forest_plot.png` — written by `bulkrna_survival.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `bulkrna_survival.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-### Demo-only outputs
-
-- `demo_bulkrna_survival_clinical.csv` — generated only on `--demo`.
-- `demo_bulkrna_survival_expr.csv` — generated only on `--demo`.
-
-## Notes
-
-Auto-generated from `bulkrna_survival.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The function library returns DataFrames and Figures. R matrix exchanges and
+backend CSVs live in temporary directories and are removed after the call.
+Backend diagnostics are available through `run_info` and the CLI's
+`result.json` data section. Reports carry the research-use disclaimer.

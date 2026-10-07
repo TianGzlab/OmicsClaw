@@ -31,14 +31,14 @@ def test_every_package_line_parses(path):
     assert names and len(set(names)) == len(names)
 
 
-def test_the_declared_names_number_71():
+def test_the_declared_names_number_75():
     names = {
         name
         for path in SKILL_FILES
         for name in parse_dependencies(path.read_text(encoding="utf-8"), source=path)
     }
-    # Spatial migration also declares the Matrix, numbat and CellChat R backends.
-    assert len(names) == 71
+    # Remaining modalities add the DESeq2, sva, survival and WGCNA R backends.
+    assert len(names) == 75
     assert "cellcharter" in names
 
 

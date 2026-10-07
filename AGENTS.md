@@ -268,13 +268,17 @@ read them. The dependency list they mirrored now lives in the body, as
 
 ### Running a skill
 
-The 27 computational single-cell and 16 spatial skills expose `_api.py` through
+The 83 computational and document-processing skills expose `_api.py` through
 `skills._sdk.notebook.load_skill`. Their CLIs keep reports and file writes;
 the function libraries return data or Figures. Each ships an executable
 `examples/example_step.py` and an API section generated from its public
-functions. `sc-count`, `sc-velocity-prep`, `sc-fastq-qc` and
-`spatial-raw-processing` stay CLI-only;
-steps call them through `run_cli`. See `templates/skill/README.md` for the
+functions. `sc-count`, `sc-velocity-prep`, `sc-fastq-qc`,
+`spatial-raw-processing` and `metabolomics-xcms-preprocessing` stay CLI-only;
+the XCMS script supports only synthetic demos and rejects real raw-MS input.
+Steps call these scripts through `run_cli`. DataFrame results carry diagnostics
+in `attrs['run_info']`, read through the library's `run_info`; CSV does not retain
+attrs. Network fetches are explicit `fetch_*` calls, separate from calculations.
+See `templates/skill/README.md` for the
 library contract and `OMICSCLAW.md` for Python/R module execution.
 
 `oc run <skill>` is gone. A skill script is now invoked **directly**, by a

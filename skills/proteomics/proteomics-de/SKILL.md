@@ -18,80 +18,115 @@ tags:
 
 ## When to use
 
-The user has a wide protein × sample CSV (rows = proteins as
-index, columns = samples) and wants two-group differential
-abundance. Three backends:
+ttest is the CLI default; welch and mann_whitney are alternatives. Groups default to the first and second half of columns.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-- `ttest` (default) — Student's two-sample t-test (equal variance).
-- `welch` — Welch's t-test (unequal variance).
-- `mann_whitney` — non-parametric Mann-Whitney U.
+## Use from a step
 
-All return per-protein `log2fc` (group2 vs group1), `pvalue`, and
-BH-adjusted `padj`. `--alpha` controls significance threshold for
-the `tables/significant.csv` shortlist; `--log2fc-threshold`
-optionally adds an absolute log2FC filter.
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-de')
+data = library.demo_data(random_state=42)
+result = library.differential_abundance(data)
+write_output(result, 'tables/differential_abundance.csv')
+```
 
-For multi-condition DE, run pairwise contrasts manually. For
-label-based TMT linear-mixed models, use MSstats / limma in R.
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-## Inputs & Outputs
+## API
 
-**Inputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- File types: `.csv`
-- Accepts artifact `proteomics.abundance_matrix` (`csv`)
+### `differential_abundance(data: pd.DataFrame, *, group1: list | None=None, group2: list | None=None, method: str='ttest') -> pd.DataFrame`
 
-**Outputs**
+Compare groups and return a new table with group2-minus-group1 log2 fold changes.
 
-- `tables/differential_abundance.csv`
-- `tables/significant.csv`
-- `report.md`
-- `result.json`
-- Produces artifact `proteomics.differential_results` as `tables/differential_abundance.csv` (`csv`)
+:param data: Protein-indexed, sample-column linear intensities; nonpositive values are missing.
+:param group1: First group columns; None uses the first half as in the CLI.
+:param group2: Second group columns; None uses the second half as in the CLI.
+:param method: CLI default ttest; welch uses unequal variance and mann_whitney tests ranks.
+:returns: Per-protein statistics and BH-adjusted p values.
+:raises ValueError: Groups overlap, are empty, or the protein index is not unique.
 
-## Flow
+### `significant(results: pd.DataFrame, *, alpha: float=0.05, log2fc_threshold: float=0.0) -> pd.DataFrame`
 
-1. Load CSV with `pd.read_csv(args.input_path, index_col=0)` (`proteomics_de.py`); split columns at midpoint — first half = group1, second half = group2. NO CLI flag for prefix/suffix.
-2. Dispatch on `--method` (`proteomics_de.py`); per-protein test → `log2fc` (mean(log2(g2)) − mean(log2(g1))) + raw `pvalue`.
-3. Apply BH FDR adjustment (`proteomics_de.py`) → `padj` column.
-4. Filter `padj < args.alpha` (and `|log2fc| ≥ args.log2fc_threshold` if > 0) → `tables/significant.csv`.
-5. Write `tables/differential_abundance.csv` (`proteomics_de.py`) + `tables/significant.csv` + `report.md` + `result.json`.
+Select significant proteins from an existing comparison.
+
+:param results: Differential abundance results with padj and log2fc.
+:param alpha: CLI default 0.05; strict upper bound on BH-adjusted p values.
+:param log2fc_threshold: CLI default 0 disables the absolute fold-change filter.
+:returns: A new table retaining selected rows.
+:raises ValueError: Thresholds are outside their allowed ranges.
+
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read comparison diagnostics.
+
+:param table: Output of differential_abundance.
+:param keep: True preserves attrs; False removes diagnostics.
+:returns: A separate diagnostic dictionary.
+:raises TypeError: The input is not a DataFrame.
+
+### `volcano_figure(results: pd.DataFrame)`
+
+Plot log2 fold change against adjusted significance.
+
+:param results: Differential abundance results.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: log2fc or padj is absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate synthetic intensities with two ordered groups.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: Protein rows and five control then five treatment columns.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+ttest is the CLI default; welch and mann_whitney are alternatives. Groups default to the first and second half of columns.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **Group assignment is by COLUMN POSITION — first half / second half.** `proteomics_de.py` splits `data.columns[:mid]` vs `data.columns[mid:]`. There is NO CLI flag for control / treatment prefixes; if your CSV columns are interleaved, pre-sort them. Demo uses `control_1..N` then `treatment_1..N`.
-- **Index column 0 is treated as the protein ID.** `pd.read_csv(args.input_path, index_col=0)` (`proteomics_de.py`) is unconditional — make sure your protein-ID column is the FIRST column in the CSV.
-- **Unknown `--method` raises `ValueError`.** `proteomics_de.py` rejects values outside `("ttest", "welch", "mann_whitney")` — argparse `choices=` enforces this at parse time too.
-- **`--input` REQUIRED unless `--demo`.** `proteomics_de.py` raises `ValueError("--input required")`.
-- **log2FC direction: group2 minus group1.** Positive `log2fc` means group2 > group1. If your "control" is in the second half of columns, you'll get inverted signs — the script does NOT auto-detect direction.
-- **NaN handling differs per backend.** `ttest` / `welch` (`proteomics_de.py`) drop rows where either group's mean is non-finite (`np.isfinite` filter). `mann_whitney` additionally drops `0` values (`g1 > 0`, `g2 > 0`) — small placeholder intensities silently disappear from Mann-Whitney runs but stay in t-test runs. Pre-impute zeros if you need consistent behaviour.
+- differential_abundance reports group2 minus group1. Nonpositive intensities do not enter the tests. significant uses BH-adjusted p values.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/differential_abundance.csv
+- tables/significant.csv
+- report.md
+- result.json
+- `reproducibility/commands.sh` records the CLI invocation template.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo
-python skills/proteomics/proteomics-de/proteomics_de.py --demo --output /tmp/de_demo
-
-# Real CSV (first half = group1, second half = group2)
-python skills/proteomics/proteomics-de/proteomics_de.py \
-  --input protein_abundance.csv --output results/ \
-  --method welch --alpha 0.05 --log2fc-threshold 1.0
-
-# Mann-Whitney (non-parametric)
-python skills/proteomics/proteomics-de/proteomics_de.py \
-  --input protein_abundance.csv --output results/ \
-  --method mann_whitney --alpha 0.01
+python skills/proteomics/proteomics-de/proteomics_de.py --demo --output /tmp/proteomics_de
 ```
+
+For real input replace `--demo` with `--input <table>`.
+
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — t-test / Welch / Mann-Whitney trade-offs, BH FDR
-- `references/output_contract.md` — `tables/differential_abundance.csv` schema
-- Adjacent skills: `proteomics-quantification` (upstream — produces protein abundance), `proteomics-data-import` (upstream — schema normalisation), `proteomics-enrichment` (downstream — pathway enrichment on significant proteins), `proteomics-ptm` (parallel — PTM site analysis)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`, `scipy`
+`numpy`, `pandas`, `matplotlib`, `scipy`

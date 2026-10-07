@@ -13,77 +13,66 @@ tags:
 - fold-change
 ---
 
-# bulkrna-de
+# Bulk differential expression
 
-## When to use
+## Purpose
 
-The user has a bulk RNA-seq count matrix (genes × samples) and wants to know
-which genes change between two groups (control vs treatment, tumour vs normal,
-etc.).  PyDESeq2 is preferred when ≥2 replicates per condition exist; Welch's
-t-test is the fallback for the single-replicate / no-PyDESeq2 case.
+Compare two prefix-selected groups in a raw count matrix. The default backend is R DESeq2; `--method ttest` selects Welch tests. The R bridge applies apeglm or ashr shrinkage when installed, otherwise raw estimates. This is not a single-cell or splicing analysis.
 
 ## Inputs & Outputs
 
-**Inputs**
+CLI input is a gene-first CSV. The library takes a gene-indexed DataFrame. Both require nonnegative integer counts. Outputs include `tables/de_results.csv`, `tables/de_significant.csv`, four diagnostic figures, `report.md` and `result.json`; DESeq2 intermediate tables are backend-dependent.
 
-- File types: `.csv`
-- Accepts artifact `bulkrna.count_matrix` (`csv`)
-- Tabular structure: at least 3 columns
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/counts.csv`
-- `tables/de_results.csv`
-- `tables/de_significant.csv`
-- `tables/deseq2_results.csv`
-- `figures/de_barplot.png`
-- `figures/ma_plot.png`
-- `figures/pvalue_histogram.png`
-- `figures/volcano_plot.png`
-- `report.md`
-- `result.json`
-- Produces artifact `bulkrna.differential_results` as `tables/de_results.csv` (`csv`)
+### `differential_expression(counts, *, method='deseq2', control_prefix='ctrl', treat_prefix='treat', padj_cutoff=0.05, lfc_cutoff=1.0, min_count=10)`
 
-## Flow
+Compare treatment against control without changing the count matrix.
 
-1. Load genes × samples raw count matrix.
-2. Auto-partition columns into control / treatment by name prefix.
-3. Pre-filter genes with total counts < 10 across all samples.
-4. Run PyDESeq2 (negative binomial GLM + Wald test) — fall back to Welch's t-test if PyDESeq2 missing or < 2 replicates per condition.
-5. Apply Benjamini–Hochberg FDR correction.
-6. Filter DEGs by `--padj-cutoff` and `--lfc-cutoff`.
-7. Render volcano / MA / p-value histogram and emit report.
+:param counts: Gene-indexed DataFrame of nonnegative integer raw counts.
+:param method: CLI default deseq2 (R); ttest selects Welch tests.
+:param control_prefix: CLI default ctrl selects control columns.
+:param treat_prefix: CLI default treat selects treatment columns.
+:param padj_cutoff: CLI default 0.05; significance requires a smaller adjusted p.
+:param lfc_cutoff: CLI default 1.0; absolute log2 effect must exceed it.
+:param min_count: Legacy filtering default 10 for total counts across selected samples.
+:returns: DE DataFrame with effect estimates, p values and run diagnostics in attrs.
+:raises ValueError: Counts, method, groups or thresholds are invalid.
+:raises ImportError: R DESeq2 is missing; use install_skill_deps for DESeq2.
 
-## Gotchas
+### `run_info(result, *, keep=True)`
 
-- **PyDESeq2 silently falls back to Welch's t-test** when fewer than 2 replicates per condition are detected or `pydeseq2` is not importable.  Check `result.json["method_used"]` to confirm which engine actually ran — the volcano-plot title alone does not surface the fallback.
-- **LFCs are unshrunk by design.** Suitable for hypothesis testing (padj thresholds), but for ranking / visualisation that emphasises high-confidence effects, apply apeglm or ashr shrinkage *outside* this skill.
-- **VST / rlog transformations are visualisation-only.** Do not feed transformed counts back into this skill — DE testing always wants raw integer counts.
-- **Sample group detection is prefix-based.** Columns must start with `--control-prefix` (default `ctrl`) or `--treat-prefix` (default `treat`); columns matching neither prefix are silently dropped.
-- **Pre-filter removes low-count genes** (total < 10).  This improves dispersion estimation but means the input gene count is not the testing gene count — `result.json["n_tested"]` is authoritative.
+Read filtering, group and executed-method diagnostics.
+
+:param result: DataFrame returned by differential_expression.
+:param keep: Default True; False removes diagnostics from attrs.
+:returns: Diagnostic dictionary, empty after removal.
+
+### `volcano_figure(result)`
+
+Plot reported log2 effects and adjusted significance.
+
+:param result: DE DataFrame with log2FoldChange and padj.
+:returns: A matplotlib Figure without saving files.
+:raises KeyError: Required columns are absent.
+
+<!-- api:end -->
 
 ## Key CLI
 
 ```bash
-# Demo run (synthetic 200-gene × 12-sample dataset)
-python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/bulkrna-de_demo
-
-# Realistic run with custom prefixes and stricter cutoffs
-python skills/bulkrna/bulkrna-de/bulkrna_de.py \
-  --input counts.csv --output results/ \
-  --control-prefix wt --treat-prefix ko \
-  --padj-cutoff 0.01 --lfc-cutoff 1.5
+python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/bulkrna-de
+python skills/bulkrna/bulkrna-de/bulkrna_de.py --input counts.csv --output results/de --method ttest
 ```
 
-## See also
+## Gotchas
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — PyDESeq2 vs t-test, design validation, LFC shrinkage and transformation guidance
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-qc` (upstream count-matrix QC), `bulkrna-enrichment` (downstream pathway enrichment of DEG lists), `bulkrna-coexpression` (parallel WGCNA), `bulkrna-splicing` (exon-level alternative splicing)
+- `run_info(result)['method_used']` identifies the executed method. Missing DESeq2 raises an installation hint; a failed R fit can fall back to Welch with a warning and `fallback_reason`.
+- `run_info(result)['lfc_note']` distinguishes Welch effects from the R bridge's package-dependent shrinkage. Welch tests are not a substitute for biological replication.
+- `run_info(result)['n_tested']` counts genes after the default total-count filter of 10. Unmatched sample prefixes do not enter the comparison.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`matplotlib`, `numpy`, `pandas`, `scipy`
+`numpy`, `pandas`, `scipy`, `matplotlib`, `DESeq2`

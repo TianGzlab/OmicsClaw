@@ -1,20 +1,8 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-└── tables/
-    └── normalized.csv
-```
+`tables/normalized.csv`, `report.md` and `result.json`. The CLI writes `reproducibility/commands.sh`.
 
-## File contents
+The function library returns tables and Figures without file writes.
+`run_info` reads DataFrame diagnostics; `keep=False` removes them.
 
-- `tables/normalized.csv` — feature × sample table after the chosen normalisation, same wide-form shape as the input (preserves the index). Written at `metabolomics_normalization.py:258`.
-- `report.md` — run parameters (`--method`) plus pre/post per-sample summary statistics.
-- `result.json` — `summary` includes `n_features`, `n_samples`, `method`.
-
-## Notes
-
-- No `figures/` directory.
-- No imputation is performed — NaN values pass through (most methods skipna).
+`normalize` preserves NaNs according to the method and performs no imputation. Zero divisors become NaN. The input index is retained in `tables/normalized.csv`.

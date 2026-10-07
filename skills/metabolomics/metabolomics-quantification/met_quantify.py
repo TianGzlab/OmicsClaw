@@ -31,8 +31,8 @@ from skills._sdk.report import (
     generate_report_footer,
 )
 from skills._sdk.result import write_result_json
+from skills._sdk.notebook import load_skill
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "met-quantify"
@@ -44,170 +44,17 @@ SKILL_VERSION = "0.5.0"
 # ---------------------------------------------------------------------------
 
 def generate_demo_data(output_dir: Path) -> Path:
-    """Generate synthetic metabolomics feature table with ~10% missing values."""
-    rng = np.random.default_rng(42)
-    n_features = 120
-    n_samples = 8
-
-    data = {
-        "feature_id": [f"M{i:04d}" for i in range(n_features)],
-        "mz": np.round(rng.uniform(80, 1200, n_features), 4),
-        "rt": np.round(rng.uniform(0.5, 25, n_features), 3),
-    }
-    for s in range(n_samples):
-        intensities = rng.lognormal(10, 2, n_features)
-        # Inject ~10 % missing values (set to 0)
-        mask = rng.random(n_features) < 0.1
-        intensities[mask] = 0
-        data[f"sample_{s + 1}"] = np.round(intensities, 2)
-
-    df = pd.DataFrame(data)
+    """Build the seeded synthetic CLI fixture."""
+    from skills.metabolomics._lib.demo import quantification
+    data = quantification()
     path = output_dir / "demo_features.csv"
-    df.to_csv(path, index=False)
-    logger.info("Generated demo data: %s", path)
+    data.to_csv(path, index=False)
     return path
 
 
 # ---------------------------------------------------------------------------
 # Core quantification pipeline
 # ---------------------------------------------------------------------------
-
-def _detect_sample_cols(df: pd.DataFrame) -> list[str]:
-    """Auto-detect sample intensity columns."""
-    sample_cols = [
-        c for c in df.columns
-        if c.startswith("sample") or c.startswith("intensity")
-    ]
-    if not sample_cols:
-        non_sample = {"feature_id", "mz", "rt", "name", "id"}
-        sample_cols = [
-            c for c in df.columns
-            if c not in non_sample and pd.api.types.is_numeric_dtype(df[c])
-        ]
-    return sample_cols
-
-
-def _count_missing(mat: pd.DataFrame) -> int:
-    """Count missing (NaN) and zero values in a numeric matrix."""
-    return int((mat == 0).sum().sum() + mat.isna().sum().sum())
-
-
-def impute_min(mat: pd.DataFrame) -> pd.DataFrame:
-    """Replace zeros/NaN with half the global non-zero minimum."""
-    mat = mat.replace(0, np.nan)
-    positive_vals = mat.values[mat.values > 0]
-    fill_val = float(positive_vals.min()) / 2 if len(positive_vals) > 0 else 1.0
-    return mat.fillna(fill_val)
-
-
-def impute_median(mat: pd.DataFrame) -> pd.DataFrame:
-    """Replace zeros/NaN with per-column median of non-zero values."""
-    mat = mat.replace(0, np.nan)
-    for col in mat.columns:
-        positive = mat[col][mat[col] > 0]
-        fill_val = float(positive.median()) if len(positive) > 0 else 1.0
-        mat[col] = mat[col].fillna(fill_val)
-    return mat
-
-
-def impute_knn(mat: pd.DataFrame, n_neighbors: int = 5) -> pd.DataFrame:
-    """KNN imputation using sklearn.impute.KNNImputer.
-
-    Missing values (0 and NaN) are first converted to NaN, then imputed using
-    the values from the K nearest neighbouring features (rows).
-    """
-    from sklearn.impute import KNNImputer
-
-    mat = mat.replace(0, np.nan)
-
-    # Transpose: KNNImputer works on rows, and we want to impute across
-    # features using sample-neighbour information.
-    imputer = KNNImputer(n_neighbors=min(n_neighbors, max(1, mat.shape[0] - 1)))
-    imputed = imputer.fit_transform(mat.values)
-
-    return pd.DataFrame(imputed, index=mat.index, columns=mat.columns)
-
-
-_IMPUTE_DISPATCH = {
-    "min": impute_min,
-    "median": impute_median,
-    "knn": impute_knn,
-}
-
-
-def normalize_tic(mat: pd.DataFrame) -> pd.DataFrame:
-    """Total-ion-count normalization."""
-    col_sums = mat.sum(axis=0).replace(0, np.nan)
-    global_sum = col_sums.median()
-    return mat.div(col_sums, axis=1).mul(global_sum)
-
-
-def normalize_median(mat: pd.DataFrame) -> pd.DataFrame:
-    """Median normalization."""
-    col_medians = mat.median(axis=0).replace(0, np.nan)
-    global_median = col_medians.median()
-    return mat.div(col_medians, axis=1).mul(global_median)
-
-
-def normalize_log(mat: pd.DataFrame) -> pd.DataFrame:
-    """Log2(x + 1) transformation."""
-    return np.log2(mat + 1)
-
-
-_NORM_DISPATCH = {
-    "tic": normalize_tic,
-    "median": normalize_median,
-    "log": normalize_log,
-}
-
-
-def quantify_features(
-    data_path: Path | str,
-    impute_method: str = "min",
-    norm_method: str = "tic",
-) -> tuple[pd.DataFrame, dict]:
-    """Quantify, impute missing values, and normalize.
-
-    Returns (processed_df, stats_dict).
-    """
-    df = pd.read_csv(data_path)
-
-    sample_cols = _detect_sample_cols(df)
-    if not sample_cols:
-        raise ValueError("Could not auto-detect sample columns in the input file.")
-
-    logger.info(
-        "Quantifying %d features across %d samples (impute=%s, norm=%s)",
-        len(df), len(sample_cols), impute_method, norm_method,
-    )
-
-    mat = df[sample_cols].copy()
-    n_missing_before = _count_missing(mat)
-
-    # Impute
-    impute_fn = _IMPUTE_DISPATCH.get(impute_method)
-    if impute_fn is None:
-        raise ValueError(f"Unknown impute method: {impute_method}")
-    mat = impute_fn(mat)
-
-    # Normalize
-    norm_fn = _NORM_DISPATCH.get(norm_method)
-    if norm_fn is None:
-        raise ValueError(f"Unknown norm method: {norm_method}")
-    mat = norm_fn(mat)
-
-    df[sample_cols] = mat
-    n_missing_after = _count_missing(mat)
-
-    return df, {
-        "n_features": len(df),
-        "n_samples": len(sample_cols),
-        "n_missing_before": n_missing_before,
-        "n_missing_after": n_missing_after,
-        "impute_method": impute_method,
-        "norm_method": norm_method,
-    }
-
 
 # ---------------------------------------------------------------------------
 # Report
@@ -270,6 +117,7 @@ def write_report(
 # ---------------------------------------------------------------------------
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Metabolomics Quantification")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -290,7 +138,9 @@ def main():
         data_path = Path(args.input_path)
         input_file = args.input_path
 
-    result_df, summary = quantify_features(data_path, args.impute, args.normalize)
+    library = load_skill("metabolomics-quantification")
+    result_df = library.quantify(pd.read_csv(data_path), impute=args.impute, normalize=args.normalize)
+    summary = library.run_info(result_df, keep=False)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)

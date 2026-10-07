@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Genomics Variant Calling — Call germline/somatic variants from SAM/VCF data.
-
-Implements a simplified pileup-based variant caller for demo purposes.
-For real data, wraps external variant callers (GATK HaplotypeCaller,
-DeepVariant, FreeBayes) via subprocess.
-
-The demo mode generates synthetic variants that match the characteristics of
-real germline variants (Ti/Tv ratio ~2.0-2.1, ~3-4M SNPs per whole genome).
-
-Usage:
-    python genomics_variant_calling.py --input <file.sam> --output <dir>
-    python genomics_variant_calling.py --demo --output <dir>
-"""
+"""Genomics variant-calling: summarize existing local files.\n\nThe CLI owns demo generation, reports and file output. Its function library\ncontains the computations. No external analysis tool is started."""
 
 from __future__ import annotations
 
@@ -19,10 +7,8 @@ import argparse
 import logging
 import random
 import sys
-from collections import Counter
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 _SDK_ANCHOR = next(
@@ -38,7 +24,6 @@ from skills._sdk.report import (
 )
 from skills._sdk.result import write_result_json
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "genomics-variant-calling"
@@ -48,33 +33,6 @@ SKILL_VERSION = "0.5.0"
 # Transitions: A<->G, C<->T (purine<->purine or pyrimidine<->pyrimidine)
 # Transversions: all other substitutions
 TRANSITIONS = {("A", "G"), ("G", "A"), ("C", "T"), ("T", "C")}
-
-
-def classify_variant(ref: str, alt: str) -> str:
-    """Classify a variant as SNP, MNP, insertion, deletion, or complex.
-
-    Classification follows VCF spec conventions:
-    - SNP: len(ref)==1 and len(alt)==1
-    - MNP: len(ref)==len(alt)>1 (e.g., AT->GC)
-    - Insertion: len(ref)<len(alt) and ref is prefix of alt
-    - Deletion: len(ref)>len(alt) and alt is prefix of ref
-    - Complex: everything else
-    """
-    if len(ref) == 1 and len(alt) == 1:
-        return "SNP"
-    elif len(ref) == len(alt) and len(ref) > 1:
-        return "MNP"
-    elif len(ref) < len(alt) and alt.startswith(ref):
-        return "INS"
-    elif len(ref) > len(alt) and ref.startswith(alt):
-        return "DEL"
-    else:
-        return "COMPLEX"
-
-
-def is_transition(ref: str, alt: str) -> bool:
-    """Check if a single-nucleotide substitution is a transition."""
-    return (ref.upper(), alt.upper()) in TRANSITIONS
 
 
 # ---------------------------------------------------------------------------
@@ -160,68 +118,6 @@ def generate_demo_variants(output_dir: Path, n_variants: int = 500) -> Path:
 
 # ---------------------------------------------------------------------------
 # VCF analysis
-# ---------------------------------------------------------------------------
-
-def analyse_vcf(vcf_path: Path) -> tuple[pd.DataFrame, dict]:
-    """Parse a VCF and compute variant calling summary statistics."""
-    records = []
-
-    with open(vcf_path, "r") as fh:
-        for line in fh:
-            if line.startswith("#"):
-                continue
-            fields = line.strip().split("\t")
-            if len(fields) < 8:
-                continue
-
-            chrom = fields[0]
-            pos = int(fields[1])
-            ref = fields[3]
-            alt = fields[4]
-            qual = float(fields[5]) if fields[5] != "." else 0
-            filt = fields[6]
-
-            # Handle multi-allelic (split by comma)
-            for a in alt.split(","):
-                vtype = classify_variant(ref, a)
-                records.append({
-                    "chrom": chrom,
-                    "pos": pos,
-                    "ref": ref,
-                    "alt": a,
-                    "qual": qual,
-                    "filter": filt,
-                    "type": vtype,
-                })
-
-    df = pd.DataFrame(records)
-    if df.empty:
-        return df, {"n_variants": 0}
-
-    type_counts = df["type"].value_counts().to_dict()
-
-    # Ti/Tv ratio (for SNPs only)
-    snps = df[df["type"] == "SNP"]
-    n_ti = sum(1 for _, r in snps.iterrows() if is_transition(r["ref"], r["alt"]))
-    n_tv = len(snps) - n_ti
-    ti_tv_ratio = round(n_ti / n_tv, 2) if n_tv > 0 else float("inf")
-
-    pass_count = (df["filter"] == "PASS").sum()
-
-    stats = {
-        "n_variants": len(df),
-        "n_pass": int(pass_count),
-        "n_snps": int(type_counts.get("SNP", 0)),
-        "n_insertions": int(type_counts.get("INS", 0)),
-        "n_deletions": int(type_counts.get("DEL", 0)),
-        "n_mnps": int(type_counts.get("MNP", 0)),
-        "n_complex": int(type_counts.get("COMPLEX", 0)),
-        "ti_tv_ratio": ti_tv_ratio,
-        "mean_qual": round(float(df["qual"].mean()), 1),
-        "median_qual": round(float(df["qual"].median()), 1),
-        "variants_per_chrom": df["chrom"].value_counts().to_dict(),
-    }
-    return df, stats
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +170,7 @@ def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Genomics Variant Calling")
     parser.add_argument("--input", dest="input_path", help="Input VCF or BAM file")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
@@ -295,7 +192,10 @@ def main():
             raise FileNotFoundError(f"Input file not found: {vcf_path}")
         input_file = args.input_path
 
-    result_df, stats = analyse_vcf(vcf_path)
+    from skills._sdk.notebook import load_skill
+    api = load_skill(SKILL_NAME)
+    result_df = api.analyze(api.read_records(vcf_path))
+    stats = api.run_info(result_df, keep=False)["summary"]
 
     # Save tables
     tables_dir = output_dir / "tables"

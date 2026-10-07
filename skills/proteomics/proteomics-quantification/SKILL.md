@@ -17,88 +17,102 @@ tags:
 
 ## When to use
 
-The user has a peptide / PSM table and wants protein-level
-abundance via one of:
+lfq sums intensities; spectral_count counts PSM rows; ibaq divides by supplied theoretical counts or a sequence-derived tryptic count.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-- `lfq` (default) — Label-Free Quantification by intensity
-  summation. Requires an `intensity` column.
-- `ibaq` — intensity-Based Absolute Quantification
-  (intensity / theoretical tryptic peptide count). Requires an
-  `intensity` column AND ONE OF: a per-protein `sequence` column
-  (in-silico digested by the script) OR a pre-computed
-  `n_theoretical_peptides` integer column. Without either, the
-  script silently estimates `unique_peptides × 1.5`.
-- `spectral_count` — PSM count per protein (no intensity needed).
+## Use from a step
 
-Pick with `--method {lfq,spectral_count,ibaq}` (default `lfq`).
-For TMT / iTRAQ label-based workflows, perform the search-engine
-quant first; this skill is intensity- / count-only.
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-quantification')
+data = library.demo_data(random_state=42)
+result = library.quantify(data)
+write_output(result, 'tables/protein_abundance.csv')
+```
 
-## Inputs & Outputs
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-**Inputs**
+## API
 
-- Modalities: lfq
-- File types: `.csv`
-- Accepts artifact `proteomics.peptide_table` (`csv`)
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `quantify(peptides: pd.DataFrame, *, method: str='lfq') -> pd.DataFrame`
 
-- `tables/protein_abundance.csv`
-- `report.md`
-- `result.json`
-- Produces artifact `proteomics.abundance_matrix` as `tables/protein_abundance.csv` (`csv`)
+Return a new protein abundance table without changing the peptides.
 
-## Flow
+:param peptides: PSM rows with protein and method-specific intensity or sequence columns.
+:param method: CLI default lfq sums intensity; spectral_count counts rows; ibaq divides by theoretical peptides.
+:returns: Protein abundances with diagnostics in attrs.
+:raises ValueError: Required columns or positive theoretical counts are missing.
 
-1. Load CSV (`--input <peptides.csv>`) or generate a demo (`--demo`).
-2. Dispatch on `--method` (`proteomics_quantification.py`); validate required columns per method.
-3. Aggregate per protein:
-   - `lfq`: sum `intensity` per protein.
-   - `ibaq`: sum `intensity` per protein, divide by `n_theoretical_peptides`. Source order at `proteomics_quantification.py`: `sequence` (compute on the fly) → `n_theoretical_peptides` (use as-is) → `unique_peptides × 1.5` (silent estimate with warning).
-   - `spectral_count`: count PSMs per protein.
-4. Write `tables/protein_abundance.csv` (`proteomics_quantification.py`) + `report.md` + `result.json`.
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read the diagnostics attached to a returned table.
+
+:param table: Table returned by quantify.
+:param keep: True preserves attrs; the CLI uses False before serialization.
+:returns: A separate diagnostic dictionary.
+:raises TypeError: The input is not a DataFrame.
+
+### `abundance_figure(table: pd.DataFrame)`
+
+Plot the distribution of protein abundance.
+
+:param table: Output of quantify, including abundance.
+:returns: A matplotlib Figure; no files are written.
+:raises KeyError: The abundance column is absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate synthetic peptide data in memory.
+
+:param random_state: CLI seed 42; change to generate another simulation.
+:returns: Synthetic peptides with protein sequences for iBAQ.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+lfq sums intensities; spectral_count counts PSM rows; ibaq divides by supplied theoretical counts or a sequence-derived tryptic count.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **`lfq` and `ibaq` require an `intensity` column; method enforces this.** `proteomics_quantification.py` raises `ValueError("Input requires an 'intensity' column for LFQ")`; raises the same for iBAQ. `spectral_count` only needs row counts (no intensity).
-- **`ibaq` requires either `sequence` OR `n_theoretical_peptides`; otherwise it SILENTLY ESTIMATES.** `proteomics_quantification.py` checks for `sequence` first (in-silico digest, K/R not before P, length 7-30), then `n_theoretical_peptides`, otherwise falls back to `unique_peptides × 1.5` with only a logger warning. The wrong column name (`theoretical_peptides` instead of `n_theoretical_peptides`) silently triggers the estimate path — always pass one of the two correct columns.
-- **Unknown `--method` raises `ValueError`.** `proteomics_quantification.py` rejects values outside `("lfq", "spectral_count", "ibaq")`. The `argparse choices=` already enforces this — the `_dispatch_method` raise is defence-in-depth for direct library calls.
-- **`--input` REQUIRED unless `--demo`.** `proteomics_quantification.py` raises `ValueError("--input required")`.
-- **Missing intensities in `lfq` are summed as 0.** `pd.Series.sum(skipna=True)` is the default — proteins with all-NaN intensities yield 0, indistinguishable from "all detected as zero". Pre-filter or impute upstream if NaN-vs-zero matters.
+- quantify rejects iBAQ without sequence or n_theoretical_peptides. LFQ is intensity summation, not MaxLFQ normalization.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/protein_abundance.csv
+- report.md
+- result.json
+- `reproducibility/commands.sh` records the CLI invocation template.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo (LFQ default)
-python skills/proteomics/proteomics-quantification/proteomics_quantification.py --demo --output /tmp/quant_demo
-
-# LFQ on real peptides
-python skills/proteomics/proteomics-quantification/proteomics_quantification.py \
-  --input peptides.csv --output results/ --method lfq
-
-# iBAQ via per-protein sequence (in-silico digest)
-python skills/proteomics/proteomics-quantification/proteomics_quantification.py \
-  --input peptides_with_sequence.csv --output results/ --method ibaq
-
-# iBAQ via pre-computed n_theoretical_peptides
-python skills/proteomics/proteomics-quantification/proteomics_quantification.py \
-  --input peptides_with_n_theo.csv --output results/ --method ibaq
-
-# Spectral counting
-python skills/proteomics/proteomics-quantification/proteomics_quantification.py \
-  --input psms.csv --output results/ --method spectral_count
+python skills/proteomics/proteomics-quantification/proteomics_quantification.py --demo --output /tmp/proteomics_quantification
 ```
+
+For real input replace `--demo` with `--input <table>`.
+
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method input requirements
-- `references/methodology.md` — LFQ / iBAQ / spectral-count semantics
-- `references/output_contract.md` — `tables/protein_abundance.csv` schema
-- Adjacent skills: `proteomics-data-import` (upstream — produces normalised peptide / protein tables), `proteomics-identification` (upstream — peptide-level summary), `proteomics-ms-qc` (parallel — protein-table QC), `proteomics-de` (downstream — differential abundance)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

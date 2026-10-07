@@ -18,13 +18,71 @@ tags:
 
 ## When to use
 
-Run as the first step on a bulk RNA-seq count matrix (genes × samples)
-before differential expression.  Surfaces the four failure modes that
-silently bias DE results: a sample with a tiny library, a sample with
-suspiciously few detected genes, a low-correlation outlier vs the rest,
-and CPM-vs-raw comparison artefacts.
+Assess raw integer count matrices before bulk differential expression. See the description for adjacent skills.
 
-## Inputs & Outputs
+## Use from a step
+
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("bulkrna-qc")
+# Supply DataFrames read with read_input(..., reader=...) for your CSV layout.
+result = library.assess(counts)
+write_output(result, "tables/result.csv")
+```
+
+The synthetic worked step is in `examples/example_step.py`.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `assess(counts)`
+
+Measure library size and detection on raw counts without changing input.
+
+:param counts: Gene-by-sample nonnegative integer DataFrame with unique labels.
+:returns: Sample-indexed DataFrame with QC metrics and diagnostic attrs.
+:raises ValueError: The matrix is invalid or a sample has no counts.
+
+### `run_info(result, *, keep=True)`
+
+Read QC diagnostics and auxiliary matrices.
+
+:param result: DataFrame returned by assess.
+:param keep: Default True; False removes diagnostics from result.attrs.
+:returns: A diagnostic dictionary, empty when no record remains.
+
+### `normalized_counts(result)`
+
+Return CPM for visualization, not differential-expression input.
+
+:param result: DataFrame returned by assess with its diagnostics retained.
+:returns: New gene-by-sample CPM DataFrame.
+:raises KeyError: QC diagnostics have been removed.
+
+### `library_figure(result)`
+
+Plot total counts per sample without saving files.
+
+:param result: QC table returned by assess.
+:returns: A matplotlib Figure; the caller saves and closes it.
+:raises KeyError: total_counts is missing.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
+
+## Gotchas
+
+- `assess` rejects empty libraries instead of producing undefined CPM.
+- `normalized_counts` returns CPM for figures, not DE input.
+- `run_info()['outlier_samples']` is correlation-based; check biological groups before removing samples.
+
+## Inputs and outputs
+
+The library returns objects without file writes. CLI inventory:
 
 **Inputs**
 
@@ -41,37 +99,16 @@ and CPM-vs-raw comparison artefacts.
 - `report.md`
 - `result.json`
 
-## Flow
-
-1. Load the count matrix (raise on missing `--input` or non-existent file per `bulkrna_qc.py`).
-2. Compute per-sample library sizes and detected-gene counts.
-3. Compute sample × sample correlation matrix; flag samples below the median-of-medians threshold as outliers.
-4. Compute CPM normalisation as a side artifact (write `tables/cpm_normalized.csv`).
-5. Render four figures and emit `report.md` + `result.json`.
-
-## Gotchas
-
-- **Hard-fails on missing input.**  `bulkrna_qc.py` raises `ValueError("--input is required when not using --demo")`; raises `FileNotFoundError` if the path doesn't exist.  No silent demo fallback when `--input` is given but invalid — fix the path or use `--demo`.
-- **CPM is for visualisation only.**  `tables/cpm_normalized.csv` is emitted as a downstream-friendly artefact, but **DE testing must always use raw counts** (PyDESeq2's negative-binomial GLM expects integer counts; feeding CPM produces meaningless dispersion estimates).  Do not pipe `cpm_normalized.csv` into `bulkrna-de`.
-- **Outlier flagging is correlation-based, not biology-aware.**  If two biological conditions differ strongly (e.g. tumour vs normal), the cross-condition correlations are *expected* to be lower — the outlier flag may fire on legitimate biology.  Cross-check `result.json["outlier_samples"]` against the experimental design before excluding samples.
-- **First column is treated as the gene-id column unconditionally.**  If the CSV has a header row but no leading id column (samples-only), the first sample column will be silently parsed as gene names and omitted from QC.  Inspect `report.md`'s "samples seen" count vs your design before trusting the output.
-
-## Key CLI
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-qc/bulkrna_qc.py --demo --output /tmp/bulkrna-qc_demo
-python skills/bulkrna/bulkrna-qc/bulkrna_qc.py --input counts.csv --output results/
+python skills/bulkrna/bulkrna-qc/bulkrna_qc.py --demo --output /tmp/bulkrna-qc
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — library-size, gene-detection, correlation-based outlier metrics
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-read-qc` / `bulkrna-read-alignment` (upstream), `bulkrna-de` (downstream — raw counts only), `bulkrna-batch-correction` (downstream if QC reveals batch effects), `sc-qc` (single-cell sibling)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `matplotlib`, `numpy`, `pandas`, `scipy`

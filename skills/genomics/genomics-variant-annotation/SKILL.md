@@ -19,27 +19,87 @@ tags:
 
 ## When to use
 
-The user has a CSV containing per-variant annotations (lowercase
-columns `chrom`, `pos`, `ref`, `alt`, `consequence`, `impact`,
-`gene`, optionally `cadd_phred`) — typically the output of running
-VEP, snpEff, or ANNOVAR upstream and exporting the resulting VCF
-to CSV (e.g. via `bcftools +split-vep`). This skill computes
-per-IMPACT counts, top consequences, and the count of distinct
-genes affected.
+Load this skill for the file-based analysis named in the description.
+The function library and CLI share the same calculations; no external
+aligner, assembler, caller or annotation service is started.
 
-The script does NOT run VEP / snpEff / ANNOVAR, and does NOT
-parse a raw VCF — it only reads CSV. For raw calling use
-`genomics-variant-calling`; for VCF filtering use
-`genomics-vcf-operations`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("genomics-variant-annotation")
+data = read_input("input.csv", reader=library.read_records)
+result = library.analyze(data)
+write_output(result, "tables/result.csv")
+write_output(library.distribution_figure(result), "figures/distribution.png")
+```
 
-**Inputs**
+Run `examples/example_step.py` through the step runner for a small,
+hand-worked synthetic fixture. It asserts known summary values.
+The reader materializes the input in memory; use bounded FASTQ reads or
+pre-filter large genomic files before loading them.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_records(path: str | Path) -> pd.DataFrame`
+
+Read records through read_input(path, reader=library.read_records).
+
+:param path: Existing input file in the format documented under Inputs and outputs.
+:returns: Parsed records as a DataFrame.
+:raises ValueError: Input values or file structure cannot be parsed.
+
+### `analyze(data: pd.DataFrame) -> pd.DataFrame`
+
+Compute variant-annotation summaries and return a new table, leaving data unchanged.
+
+:param data: Records containing impact, consequence, gene, cadd_phred.
+
+:returns: Result table with diagnostics and summary in attrs['run_info'].
+:raises ValueError: Required columns are absent or records are empty or invalid.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return the analysis diagnostics and summary.
+
+:param data: Result returned by analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: analyze has not populated diagnostics.
+
+### `distribution_figure(data: pd.DataFrame)`
+
+Plot cadd_phred values without writing files.
+
+:param data: Result table containing cadd_phred.
+:returns: Matplotlib Figure.
+:raises ValueError: The value column is absent or the table is empty.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`analyze` returns a new DataFrame and leaves the input unchanged.
+`run_info(result)` returns the summary and method diagnostics.
+The CLI passes `keep=False` so diagnostics do not enter output tables.
+All calculations are deterministic; synthetic CLI demos retain seed 42.
+
+## Gotchas
+
+- `analyze` summarizes annotations already supplied by the caller; it does not run VEP, SIFT, PolyPhen or CADD.
+- `analyze` requires lowercase impact, consequence, gene and cadd_phred columns. Missense rows also require sift_prediction and polyphen_prediction.
+- `tables/annotated_variants.csv` from --demo contains simulated scores, not predictions for real variants.
+
+## Inputs and outputs
+
+Input files:
 
 - File types: `.csv`
 - Accepts artifact `genomics.variant_table` (`csv`)
 
-**Outputs**
+CLI output files:
 
 - `tables/annotated_variants.csv`
 - `tables/impact_distribution.csv`
@@ -47,42 +107,23 @@ parse a raw VCF — it only reads CSV. For raw calling use
 - `result.json`
 - Produces artifact `genomics.annotated_variants` as `tables/annotated_variants.csv` (`csv`)
 
-## Flow
+The library writes no files. Steps use `write_output`; the CLI owns the
+listed artifacts. Public figure functions return matplotlib Figures and
+do not add new CLI outputs.
 
-1. Load CSV (`--input <annotated.csv>`) or generate a demo annotated CSV at `output_dir/demo_annotated_variants.csv` with `--n-variants` records (`variant_annotation.py`).
-2. Read columns directly via `pd.read_csv` (`variant_annotation.py`) — no VCF / VEP / snpEff parser exists in this skill.
-3. Aggregate per-IMPACT counts (`variant_annotation.py`); pick top-N consequences; count distinct genes touched.
-4. Write `tables/annotated_variants.csv` (`variant_annotation.py`) + `tables/impact_distribution.csv` + `report.md` + `result.json`.
-
-## Gotchas
-
-- **CSV-only — no VCF parser exists.** `variant_annotation.py` is `pd.read_csv(input_path)`; passing a `.vcf` raises `ValueError("Could not parse input file: ...")`. Convert VCFs to CSV first with `bcftools +split-vep -d -f '%CHROM,%POS,%REF,%ALT,%CSQ\n'` and post-process to the required column names.
-- **Required CSV columns are LOWERCASE.** Code reads `df["impact"]`, `df["consequence"]`, `df["gene"]`, and optionally `df["cadd_phred"]`. A CSV with `IMPACT` / `Consequence` / `Gene` raises `KeyError`.
-- **`--input` REQUIRED unless `--demo`.** `variant_annotation.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`.
-- **No annotator is invoked.** This skill consumes an already-annotated CSV — it does NOT run VEP / snpEff / ANNOVAR. Run an annotator upstream and convert its output to CSV.
-- **CADD scoring is optional.** When `cadd_phred` is absent the report omits the CADD section; do NOT add a placeholder NaN column or the value-counts will mis-render.
-- **Demo CSV uses fixed IMPACT proportions (~10% HIGH, 30% MODERATE, 50% LOW, 10% MODIFIER).** Useful for smoke tests; not biologically meaningful.
-
-## Key CLI
+## CLI
 
 ```bash
-# Demo
-python skills/genomics/genomics-variant-annotation/variant_annotation.py --demo --output /tmp/anno_demo
-
-# Real annotated CSV (lowercase columns)
-python skills/genomics/genomics-variant-annotation/variant_annotation.py \
-  --input my_annotations.csv --output results/
+python skills/genomics/genomics-variant-annotation/variant_annotation.py --input input_file --output results/
+python skills/genomics/genomics-variant-annotation/variant_annotation.py --demo --output /tmp/genomics_variant_annotation_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — VEP / snpEff / ANNOVAR field semantics, IMPACT taxonomy
-- `references/output_contract.md` — `tables/annotated_variants.csv` + impact distribution
-- Adjacent skills: `genomics-variant-calling` (upstream — produces raw VCF), `genomics-vcf-operations` (upstream — filtering / normalisation before annotation), `genomics-sv-detection` (parallel — structural variants), `genomics-phasing` (parallel — phasing analysis)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

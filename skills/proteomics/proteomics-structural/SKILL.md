@@ -21,81 +21,104 @@ tags:
 
 ## When to use
 
-The user has a cross-linking MS (XL-MS) results CSV (from XlinkX,
-pLink, xiSEARCH, etc.) and wants a summary: intra- vs inter-protein
-classification, optional FDR filtering, and distance-constraint
-validation against the per-crosslinker max distance (Rappsilber
-(2011) Cα-Cα bounds).
+The CLI defaults are DSS and fdr_threshold=0.05. DSS/BS3/DSSO/DSBU use 30 angstrom; EDC uses 20 angstrom.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-`--crosslinker {DSS,BS3,EDC,DSSO,DSBU}` (default `DSS`) sets the
-max-distance threshold (`CROSSLINKER_CONSTRAINTS` at
-`struct_proteomics.py`: DSS/BS3/DSSO/DSBU = 30 Å, EDC =
-20 Å). `--fdr` (default 0.05) filters by the `fdr` column when
-present.
+## Use from a step
 
-This skill does NOT run an XL-MS search engine — feed it the
-already-searched results.
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-structural')
+data = library.demo_data(random_state=42)
+result = library.analyse_crosslinks(data)
+write_output(result, 'tables/crosslinks.csv')
+```
 
-## Inputs & Outputs
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-**Inputs**
+## API
 
-- File types: `.csv`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `analyse_crosslinks(data: pd.DataFrame, *, fdr_threshold: float=0.05, crosslinker: str='DSS') -> pd.DataFrame`
 
-- `tables/crosslinks.csv`
-- `tables/inter_protein_crosslinks.csv`
-- `report.md`
-- `result.json`
+Return filtered crosslinks with protein-pair and optional distance classifications.
 
-## Flow
+:param data: Crosslink rows with protein_a and protein_b, optional fdr and distance_angstrom.
+:param fdr_threshold: CLI default 0.05; filters only when an fdr column is present.
+:param crosslinker: CLI default DSS; BS3, DSSO and DSBU use 30 A, EDC uses 20 A.
+:returns: New crosslink table; absent distance evidence remains unchecked in run_info.
+:raises ValueError: Protein identifiers, crosslinker or confidence threshold are invalid.
 
-1. Load CSV (`--input <crosslinks.csv>`) or generate a demo at `output_dir/demo_crosslinks.csv` (`struct_proteomics.py`).
-2. If `fdr` column present, filter to `df[df["fdr"] <= --fdr]` (`struct_proteomics.py`); otherwise pass-through.
-3. Derive `link_type` from `protein_a == protein_b` comparison when both columns are present (`struct_proteomics.py`); otherwise count all rows as intra.
-4. If `distance_angstrom` column present, compute satisfaction rate vs `CROSSLINKER_CONSTRAINTS[--crosslinker]` (`struct_proteomics.py`); add per-row `constraint_satisfied` boolean column.
-5. Write `tables/crosslinks.csv` (`struct_proteomics.py`) + `tables/inter_protein_crosslinks.csv` (only if non-empty) + `report.md` + `result.json`.
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read crosslink analysis diagnostics.
+
+:param table: Output of analyse_crosslinks.
+:param keep: True preserves attrs; False removes diagnostics.
+:returns: A separate dictionary stating which optional checks ran.
+:raises TypeError: The input is not a DataFrame.
+
+### `distance_figure(table: pd.DataFrame)`
+
+Plot measured crosslink distances.
+
+:param table: Crosslinks containing distance_angstrom.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: distance_angstrom is absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate synthetic crosslink records in memory.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: Two hundred crosslinks with simulated distances and confidence.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+The CLI defaults are DSS and fdr_threshold=0.05. DSS/BS3/DSSO/DSBU use 30 angstrom; EDC uses 20 angstrom.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **Required input columns are `protein_a` and `protein_b`** (lowercase, with underscore-letter — NOT `protein1` / `protein2`). `struct_proteomics.py` checks `{"protein_a", "protein_b"}.issubset(df_filtered.columns)`. Without both, ALL rows silently classify as `intra-protein` — n_inter = 0 even on a real inter-protein dataset. XlinkX exports use `Protein A` / `Protein B`; rename first.
-- **`--crosslinker` drives the distance-constraint check, NOT just metadata.** `struct_proteomics.py` sets `max_distance = CROSSLINKER_CONSTRAINTS.get(crosslinker.upper(), 30.0)` — the active threshold for `constraint_satisfied` column + `constraint_satisfaction_rate` summary. Choices: DSS / BS3 / DSSO / DSBU = 30 Å, EDC = 20 Å (Rappsilber 2011 Cα-Cα bounds).
-- **Distance check is OPT-IN by `distance_angstrom` column presence.** Without that column, `constraint_satisfaction_rate` defaults to 100% (`struct_proteomics.py`) — the constraint feature is silently skipped, not failed. Pass `distance_angstrom` (Cα-Cα predicted distance from a 3D model) for a real check.
-- **`fdr` filter is OPT-IN by column presence.** `struct_proteomics.py` only filters when `fdr` exists — without that column, EVERY input row is kept regardless of `--fdr`. Pre-add an `fdr` column (or a placeholder of zeros) if you need the filter to bite.
-- **`--input` REQUIRED unless `--demo`.** `struct_proteomics.py` raises `ValueError("--input required when not using --demo")`.
-- **`tables/inter_protein_crosslinks.csv` only appears when there ARE inter-protein links.** A purely-intra dataset writes only `tables/crosslinks.csv`. Downstream consumers should check file existence.
+- analyse_crosslinks requires protein_a and protein_b. run_info records missing distance evidence as unchecked with null satisfaction counts, never 100% passed. FDR filtering requires an fdr column.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/crosslinks.csv
+- tables/inter_protein_crosslinks.csv (when link_type exists; can be empty)
+- report.md
+- result.json
+- `demo_crosslinks.csv` is written only with `--demo`.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo
-python skills/proteomics/proteomics-structural/struct_proteomics.py --demo --output /tmp/xl_demo
-
-# Real XL-MS data, default DSS / 5% FDR
-python skills/proteomics/proteomics-structural/struct_proteomics.py \
-  --input crosslinks.csv --output results/
-
-# DSBU at 1% FDR
-python skills/proteomics/proteomics-structural/struct_proteomics.py \
-  --input crosslinks.csv --output results/ \
-  --crosslinker DSBU --fdr 0.01
-
-# EDC (zero-length, 20 Å threshold)
-python skills/proteomics/proteomics-structural/struct_proteomics.py \
-  --input crosslinks.csv --output results/ \
-  --crosslinker EDC --fdr 0.05
+python skills/proteomics/proteomics-structural/struct_proteomics.py --demo --output /tmp/proteomics_structural
 ```
+
+For real input replace `--demo` with `--input <table>`.
+
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — XL-MS workflow, Rappsilber Cα-Cα bounds, FDR caveats
-- `references/output_contract.md` — `tables/crosslinks.csv` schema, derived columns
-- Adjacent skills: `proteomics-data-import` (parallel — peptide / protein-level workflows), `proteomics-ptm` (parallel — PTM analysis), `proteomics-quantification` (parallel — protein abundance), `proteomics-enrichment` (downstream — pathway enrichment on inter-protein partners)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

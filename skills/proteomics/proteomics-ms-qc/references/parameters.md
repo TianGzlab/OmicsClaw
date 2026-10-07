@@ -1,12 +1,6 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+The public defaults and argument meanings are in the generated API section
+of `../SKILL.md`. Run the documented CLI with `--help` for file and report options.
 
-_No extra flags beyond the standard `--input` / `--output` / `--demo` set._
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+Numeric columns excluding metadata-like names are samples; if none remain, all numeric columns are used. Zero and NaN count as missing.

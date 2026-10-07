@@ -1,8 +1,6 @@
 ---
 name: bulkrna-coexpression
-description: Load when discovering gene co-expression modules and hub genes in a bulk RNA-seq cohort via
-  WGCNA-style soft-thresholded networks. Skip when direct DE comparison (use bulkrna-de); PPI lookup of
-  an existing gene list (use bulkrna-ppi-network); single-cell co-expression (use sc-grn).
+description: Load when discovering bulk gene co-expression modules and hub genes with R WGCNA. Skip direct expression contrasts (use bulkrna-de), existing-gene-list PPI lookup (use bulkrna-ppi-network), or single-cell networks (use sc-grn).
 trigger: coexpression, WGCNA, gene network, co-expression modules, hub genes, gene modules
 tags:
 - bulkrna
@@ -17,66 +15,119 @@ tags:
 
 ## When to use
 
-Run on a bulk RNA-seq cohort (≥15 samples recommended; works on smaller
-sets but module structure is unstable below that) when you want to find
-groups of co-regulated genes ("modules") and the hub genes within each.
-Soft-thresholded correlation network in the WGCNA style; outputs module
-assignments and hub genes.
+Load when discovering bulk gene co-expression modules and hub genes with R WGCNA. Skip direct expression contrasts (use bulkrna-de), existing-gene-list PPI lookup (use bulkrna-ppi-network), or single-cell networks (use sc-grn).
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill("bulkrna-coexpression")
+result = library.analyze(data, power=6, min_module_size=10)
+write_output(result, "tables/result.csv")
+write_output(library.module_sizes_figure(result), "figures/result.png")
+```
 
-- File types: `.csv`
+Read expression and metadata with `read_input` before calling the library.
+`examples/example_step.py` constructs a small synthetic dataset and checks
+its results through the step runner and fresh-kernel replay.
 
-**Outputs**
+## API
 
-- `tables/counts.csv`
-- `tables/gene_modules.csv`
-- `tables/hub_genes.csv`
-- `tables/module_assignments.csv`
-- `tables/soft_power_table.csv`
-- `tables/threshold_fit.csv`
-- `figures/module_dendrogram.png`
-- `figures/module_sizes.png`
-- `figures/scale_free_fit.png`
-- `wgcna_info.json`
-- `report.md`
-- `result.json`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-## Flow
+### `analyze(data: pd.DataFrame, *, power: int | None=None, min_module_size: int=10, random_state: int=54321) -> pd.DataFrame`
 
-1. Load count matrix; validate `--input` (`bulkrna_coexpression.py` parser-error / `FileNotFoundError`).  Demo path uses `get_demo_data`'s built-in fixture.
-2. Validate sample count: `core_analysis` raises `ValueError("WGCNA requires >= 8 samples ...")` below 8 and warns "Low sample count" between 8 and 15 but proceeds.
-3. Try the R WGCNA bridge (`_run_wgcna_r` via subprocess); `core_analysis` raises `RuntimeError("R WGCNA failed: ...")` if R or the WGCNA package is unavailable.
-4. The Python helper `_select_soft_threshold` is a sanity-check / diagnostic that scores candidate powers by scale-free R² — used as a fallback / exploratory aid, not the production estimator.  R WGCNA's own `pickSoftThreshold` drives the real run.
-5. Build modules in R; collect assignments + hub genes; emit `module_assignments.csv`, `hub_genes.csv`, `threshold_fit.csv`.
+Return R WGCNA gene-module assignments, leaving expression unchanged.
+
+:param data: Nonnegative feature-by-sample expression; provide normalized data on the intended correlation scale.
+:param power: CLI default None selects the soft threshold; set a positive integer to override it.
+:param min_module_size: CLI default 10 genes per module.
+:param random_state: WGCNA blockwiseModules default seed 54321; fixes its preclustering.
+:returns: Gene/module DataFrame with diagnostics, hub genes and threshold fit in attrs.
+:raises ValueError: Input, sample count, power or module size is invalid.
+:raises ImportError: R WGCNA or Matrix is unavailable.
+:raises RuntimeError: R analysis fails.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return WGCNA method diagnostics and summary.
+
+:param data: Result from analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: No WGCNA diagnostics are present.
+
+### `threshold_fit(data: pd.DataFrame) -> pd.DataFrame`
+
+Return the signed scale-free fit for each tested soft threshold.
+
+:param data: Result from analyze.
+:returns: Table containing power, r_squared and mean_connectivity.
+:raises ValueError: No fit table is stored.
+
+### `hub_genes(data: pd.DataFrame) -> pd.DataFrame`
+
+Return the highest absolute module-membership genes per non-grey module.
+
+:param data: Result from analyze.
+:returns: Table with gene, module and kME columns.
+:raises ValueError: No hub table is stored.
+
+### `module_sizes_figure(data: pd.DataFrame)`
+
+Plot assignment counts, including grey unassigned genes.
+
+:param data: Gene/module table from analyze.
+:returns: Matplotlib Figure.
+:raises ValueError: The module column is missing.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+The function library returns DataFrames and Figures. The CLI loads the
+same library and owns reports and file writes. R runs in a temporary
+directory using Matrix Market, feature/sample identifiers and metadata.
+No R intermediate is a permanent CLI output.
 
 ## Gotchas
 
-- **WGCNA hard-fails below 8 samples.**  `bulkrna_coexpression.py` raises `ValueError`.  Between 8 and 15 the run proceeds but warns "Low sample count (N). WGCNA recommends >= 15 samples for reliable module detection." — treat any modules from <15-sample cohorts as exploratory.
-- **R WGCNA is required for the production path.**  `core_analysis` raises `RuntimeError` with installation instructions if R or the `WGCNA` package isn't importable.  There is no Python-only fallback that produces module assignments — installing R+WGCNA is mandatory for non-demo runs.
-- **Per-power scale-free R² is in `tables/threshold_fit.csv`, not `result.json`.**  The summary dict carries `soft_power` (the chosen power) but no R² value; inspect the threshold-fit table to assess scale-free quality.  Below R² ≈ 0.8 the network is not scale-free and modules become noise.
-- **No biological-replicate filter.**  Unlike PyDESeq2, this skill makes no distinction between technical and biological replicates.  Modules built on a cohort with hidden batch structure will reflect the batch, not biology — run `bulkrna-batch-correction` upstream if PCA shows batch separation.
-- **Hub genes are connectivity-based, not necessarily biology-load-bearing.**  A hub in WGCNA means "highest intramodular correlation" — useful as a starting hypothesis but not proof of regulatory primacy.  Validate with knockdown / knockout data or eQTL evidence.
+- `analyze` requires R WGCNA and Matrix, at least eight samples, and finite nonnegative expression. Cohorts with fewer than 15 samples emit a warning.
+- `analyze(power=None)` selects a soft threshold; an explicit power is honored. Integer matrices are converted to double for WGCNA.
+- `run_info()["filtered_genes"]` lists genes removed by WGCNA quality checks. Grey is unassigned; module IDs are color strings.
+- `hub_genes` ranks absolute module membership within each non-grey module. This is correlation evidence, not proof of regulation.
+- `threshold_fit` reports signed scale-free R-squared and connectivity. The correlation analysis uses the supplied expression scale; normalize upstream as needed.
+- `analyze(random_state=54321)` preserves the WGCNA default seed and uses one R thread. No Python module-detection fallback is used.
 
-## Key CLI
+## Inputs and outputs
+
+Expression CSV with genes in the first column and samples in the remaining columns. The API takes that gene column as the DataFrame index.
+
+CLI outputs:
+
+- `tables/module_assignments.csv`
+- `tables/hub_genes.csv`
+- `tables/threshold_fit.csv`
+- `figures/scale_free_fit.png`
+- `figures/module_sizes.png`
+- `figures/module_dendrogram.png` (assignment overview, not a dendrogram)
+- `report.md`, `result.json`
+- `reproducibility/commands.sh`
+
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-coexpression/bulkrna_coexpression.py --demo --output /tmp/bulkrna-coexpression_demo
-python skills/bulkrna/bulkrna-coexpression/bulkrna_coexpression.py \
-  --input counts.csv --output results/
+python skills/bulkrna/bulkrna-coexpression/bulkrna_coexpression.py --demo --output /tmp/bulkrna_coexpression_demo
 ```
+
+Run the script with `--help` for real-input arguments.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — soft-thresholding, module detection, hub-gene definition
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-batch-correction` (run upstream if batches suspected), `bulkrna-de` (parallel: differential expression), `bulkrna-ppi-network` (parallel: STRING PPI on a gene list), `sc-grn` (single-cell sibling using GRNBoost2 / pySCENIC)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`matplotlib`, `numpy`, `pandas`, `scipy`
+`matplotlib`, `numpy`, `pandas`, `scipy`, `WGCNA`, `Matrix`

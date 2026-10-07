@@ -1,0 +1,13 @@
+# %% [markdown]
+# Seeded synthetic example; results are not biological evidence.
+
+# %%
+from skills._sdk.notebook import load_skill, write_output
+from skills.metabolomics._lib.demo import quantification
+data = quantification()
+library = load_skill('metabolomics-quantification')
+result = library.quantify(data)
+assert len(result) > 0
+write_output(result, 'tables/quantified_features.csv')
+figure = library.distribution_figure(result)
+write_output(figure, 'figures/analysis.png')

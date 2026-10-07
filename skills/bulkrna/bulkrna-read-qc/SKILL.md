@@ -18,56 +18,119 @@ tags:
 
 ## When to use
 
-Run as the first step on raw bulk RNA-seq FASTQ files (single or paired-end)
-before aligning.  Reports per-base Phred quality, GC content, adapter
-contamination signals, read length distribution, and Q20/Q30 fractions —
-the metrics needed to decide whether trimming is worth the trouble.
+Read raw Phred+33 FASTQ before alignment. This implements selected quality
+metrics, not the complete FastQC suite. Use `bulkrna-read-alignment` for logs.
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('bulkrna-read-qc')
+data = library.demo_data(random_state=42)
+result = library.quality_control(data)
+write_output(result, 'tables/qc_summary.csv')
+```
 
-- File types: `.fastq`, `.fq`
+For real files, pass `read_fastq`, `read_log` or `read_reference` as appropriate
+to `read_input(..., reader=...)`. `examples/example_step.py` is executable.
 
-**Outputs**
+## API
 
-- `tables/qc_summary.csv`
-- `figures/gc_content.png`
-- `figures/per_base_quality.png`
-- `figures/quality_score_distribution.png`
-- `figures/read_length_distribution.png`
-- `report.md`
-- `result.json`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-## Flow
+### `read_fastq(path: str | Path, *, max_reads: int=100000) -> pd.DataFrame`
 
-1. Open the FASTQ (auto-decompresses `.gz` per `bulkrna_read_qc.py`).
-2. Sample reads, decode Phred quality from header line 4 of each record.
-3. Compute per-base quality, GC content, length distribution, adapter motif counts.
-4. Render figures and write `report.md` + `result.json`.
+Read FASTQ records; pass this function as reader= to read_input.
+
+:param path: FASTQ path; a .gz suffix selects gzip decompression.
+:param max_reads: CLI limit 100000; increase for a larger leading-read sample.
+:returns: Sequence and Phred+33 quality strings as rows.
+:raises ValueError: Records are truncated, malformed, or have unequal sequence/quality lengths.
+
+### `quality_control(reads: pd.DataFrame, *, max_reads: int=100000) -> pd.DataFrame`
+
+Compute a new one-row quality summary for Phred+33 reads.
+
+:param reads: sequence and quality string columns; input rows are not changed.
+:param max_reads: CLI default 100000 leading records; increase to inspect more reads.
+:returns: Scalar QC metrics and adapter counts; run_info retains per-base distributions.
+:raises ValueError: Reads, lengths or Phred+33 scores are invalid.
+
+### `run_info(result: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read full quality distributions and sampling diagnostics.
+
+:param result: Output of quality_control.
+:param keep: True preserves attrs; False removes diagnostics before serialization.
+:returns: A separate dictionary containing metrics and sampling provenance.
+:raises TypeError: The result is not a DataFrame.
+
+### `quality_figure(result: pd.DataFrame)`
+
+Plot mean and interquartile quality by read position.
+
+:param result: QC result retaining its diagnostic attrs.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: Per-base diagnostics are absent.
+
+### `gc_figure(result: pd.DataFrame)`
+
+Plot GC fractions across sampled reads.
+
+:param result: QC result retaining its diagnostic attrs.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: GC diagnostics are absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate valid synthetic FASTQ records in memory.
+
+:param random_state: CLI seed 42; change for another simulation without altering global RNG state.
+:returns: Five thousand 150-base reads with quality strings of the same length.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`read_fastq` reads the leading 100000 records by default and accepts `.gz`.
+`quality_control` computes per-base quality, Q20/Q30, GC, lengths and adapter
+motif hits from sequence/quality strings. It does not trim reads.
 
 ## Gotchas
 
-- **This is a pure-Python reimplementation of FastQC core metrics, not FastQC itself.**  Coverage of the more obscure FastQC modules (overrepresented sequences, k-mer enrichment, per-tile quality) is intentionally omitted to keep the skill dependency-free.  For full FastQC parity, run FastQC directly and feed the report into MultiQC.
-- **Phred encoding is assumed to be Phred+33 (Sanger / Illumina 1.8+).**  Older Illumina 1.3–1.7 platforms used Phred+64 — the per-base quality values will look ~31 points too high if such input is fed in unchanged.  Confirm the source platform before trusting Q20/Q30 numbers.
-- **`.gz` detection is filename-suffix only** (`bulkrna_read_qc.py` checks `.endswith(".gz")`).  A gzipped file misnamed without `.gz` will be opened as text and silently produce garbage; rename or symlink before running.
+- `read_fastq` rejects truncated FASTQ and unequal sequence/quality lengths.
+- `quality_control` assumes Phred+33, not the older Phred+64 encoding.
+- `adapter_rate` sums motif hits and can exceed 100% if a read contains multiple adapters.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI writes these artifacts; functions return DataFrames and Figures without writing them:
+
+- `tables/qc_summary.csv`
+- `figures/per_base_quality.png`
+- `figures/gc_content.png`
+- `figures/read_length_distribution.png`
+- `figures/quality_score_distribution.png`
+- `report.md`
+- `result.json`
+- `reproducibility/commands.sh`
+- `demo_reads.fastq` only with `--demo`.
+
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-read-qc/bulkrna_read_qc.py --demo --output /tmp/bulkrna-read-qc_demo
-python skills/bulkrna/bulkrna-read-qc/bulkrna_read_qc.py --input reads.fastq.gz --output results/
+python skills/bulkrna/bulkrna-read-qc/bulkrna_read_qc.py --demo --output /tmp/bulkrna_read_qc
 ```
+
+For real files use `--input <file>`; trajectory placement also needs `--reference <file>`.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — Phred decoding, sampling strategy, adapter detection
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-read-alignment` (downstream after alignment), `bulkrna-qc` (downstream after counting), `sc-fastq-qc` (single-cell sibling), `genomics-qc` (genomic-DNA sibling)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `matplotlib`, `numpy`, `pandas`

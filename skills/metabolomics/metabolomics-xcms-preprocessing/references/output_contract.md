@@ -1,20 +1,10 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-└── tables/
-    └── peak_table.csv
-```
+- `tables/peak_table.csv`: wide synthetic table with mz, mzmin, mzmax, rt,
+  rtmin, rtmax, into, maxo and sample_1 through sample_5.
+- `report.md`: parameters and simulation summary.
+- `result.json`: summary has n_samples, n_peaks, mz_min, mz_max, rt_min and rt_max;
+  data.params records ppm and peakwidth.
+- `reproducibility/commands.sh`: historical command record, not a replay capsule.
 
-## File contents
-
-- `tables/peak_table.csv` — feature-level peak table with columns `mz`, `rt`, plus per-sample intensity columns (long form). Written at `metabolomics_xcms_preprocessing.py:211`.
-- `report.md` — Markdown summary with run parameters and feature count.
-- `result.json` — standardised envelope with `summary` (`n_features`, `n_samples`, `ppm`, `peakwidth_min`, `peakwidth_max`) and `data` (empty).
-
-## Notes
-
-- No `figures/` directory is generated — this skill emits the peak table only.
-- No `processed.h5ad` (this is a metabolomics file pipeline, not AnnData).
+No figures or H5AD files are written. Real input is rejected before outputs.

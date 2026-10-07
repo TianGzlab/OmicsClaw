@@ -12,7 +12,7 @@ tags:
 
 # bulkrna-cosinor-rhythm
 
-## When to use
+## Purpose
 
 Use this Skill for a bulk RNA time-course CSV whose sample columns follow
 `T{hour}_R{replicate}` and require a deterministic 24-hour, single-component
@@ -28,6 +28,36 @@ the design has covariates, or multi-harmonic/non-sinusoidal rhythms are needed.
 - `cosinor_results.csv`
 - `semantic_summary.json`
 
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `fit(timecourse)`
+
+Fit a fixed 24-hour sinusoid independently to each gene.
+
+:param timecourse: Gene-indexed DataFrame with T00_R1-style sample columns.
+:returns: Parameter DataFrame with descriptive rhythmic flags and diagnostics.
+:raises ValueError: Empty data, missing time columns or infinite expression.
+
+### `run_info(result, *, keep=True)`
+
+Read gene counts and time-column filtering decisions.
+
+:param result: DataFrame returned by fit.
+:param keep: Default True; False removes diagnostic attrs.
+:returns: Diagnostic dictionary, empty after removal.
+
+### `rhythm_figure(result)`
+
+Plot fitted amplitude against phase, without writing files.
+
+:param result: Parameter DataFrame returned by fit.
+:returns: matplotlib Figure.
+:raises KeyError: Parameter columns are missing.
+
+<!-- api:end -->
+
 ## Flow
 
 1. Load `--input <csv>` or the repository-bound demo dataset via `--demo`.
@@ -38,7 +68,9 @@ the design has covariates, or multi-harmonic/non-sinusoidal rhythms are needed.
 
 ## Gotchas
 
-- _None yet — append as failure modes are reported._
+- `cosinor_results.csv` marks rhythmic genes with descriptive thresholds (R-squared ≥ 0.8 and amplitude/mesor ≥ 0.2), not a significance test.
+- `semantic_summary.json` lists columns dropped for more than 20% missing values. Duplicate gene identifiers keep their first row; fits with insufficient observations or a singular design return missing parameters.
+- `cosinor_results.csv` uses a fixed 24-hour period; `--method` is retained as a report label, not a backend selector.
 
 ## Key CLI
 
@@ -62,4 +94,4 @@ python skills/bulkrna/run-derived/bulkrna-cosinor-rhythm/bulkrna_cosinor_rhythm.
 
 Python packages this skill's script needs. They are not installed for you — check before a long run.
 
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

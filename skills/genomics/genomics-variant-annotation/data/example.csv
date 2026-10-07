@@ -1,0 +1,5 @@
+chrom,pos,ref,alt,consequence,impact,gene,cadd_phred,sift_prediction,polyphen_prediction
+chr1,100,A,G,missense_variant,MODERATE,TP53,24,deleterious,probably_damaging
+chr1,200,C,T,stop_gained,HIGH,BRCA1,35,.,.
+chr2,100,G,C,synonymous_variant,LOW,TP53,3,.,.
+chr2,300,A,T,intron_variant,MODIFIER,.,1,.,.

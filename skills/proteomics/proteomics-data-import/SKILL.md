@@ -18,77 +18,110 @@ tags:
 
 ## When to use
 
-The user has a search-engine output (MaxQuant `proteinGroups.txt`,
-FragPipe `combined_protein.tsv`, DIA-NN main report, or a generic
-CSV / TSV protein table) and wants it normalised into OmicsClaw's
-standard schema (lowercase `protein_id` plus `LFQ_<sample>` /
-`Int_<sample>` intensity columns derived from MaxQuant's
-`LFQ intensity ...` / `Intensity ...` headers).
-Pick the format with `--format {maxquant,fragpipe,diann,generic}`
-(default `maxquant`).
+maxquant is the default; fragpipe, diann and generic normalize their own column names. read_table detects CSV/TSV separation.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-For raw MS spectra (mzML / RAW), run a search engine first
-(MaxQuant / FragPipe / DIA-NN) and feed THIS skill the resulting
-table.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-data-import')
+data = library.demo_data(random_state=42)
+result = library.standardize(data)
+write_output(result, 'tables/proteins.csv')
+```
 
-**Inputs**
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-- File types: `.txt`, `.tsv`, `.csv`
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/proteins.csv`
-- `report.md`
-- `result.json`
+### `read_table(path: str | Path) -> pd.DataFrame`
 
-## Flow
+Read a CSV or TSV; pass this function as reader= to read_input.
 
-1. Load input (`--input <file>`) or generate a demo MaxQuant-shaped file (`--demo`).
-2. Dispatch to the format-specific importer (`proteomics_data_import.py` `_dispatch_import`); supported keys are `maxquant`, `fragpipe`, `diann`, `generic`.
-3. Rename columns: `LFQ intensity <sample>` → `LFQ_<sample>` and `Intensity <sample>` → `Int_<sample>` (`proteomics_data_import.py`); `Majority protein IDs` → `protein_id`; `Gene names` → `gene_name`; etc.
-4. Write `tables/proteins.csv` (`proteomics_data_import.py`) + `report.md` + `result.json`.
+:param path: Search-engine output file; the first line selects comma or tab separation.
+:returns: Unmodified input columns as a DataFrame.
+:raises OSError: The file cannot be read.
+
+### `standardize(data: pd.DataFrame, *, format: str='maxquant') -> pd.DataFrame`
+
+Return a standardized copy of a search-engine protein table.
+
+:param data: Original protein table with engine-specific column names.
+:param format: CLI default maxquant; fragpipe, diann and generic use their own mappings.
+:returns: Protein table; MaxQuant reverse, contaminant and site-only flags are filtered.
+:raises ValueError: The format is unsupported.
+
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read import diagnostics.
+
+:param table: Standardized protein table.
+:param keep: True preserves attrs; False removes diagnostics.
+:returns: A separate diagnostic dictionary.
+:raises TypeError: The input is not a DataFrame.
+
+### `intensity_figure(table: pd.DataFrame)`
+
+Plot numeric column medians for checking an imported table.
+
+:param table: Standardized protein table; numeric metadata is included.
+:returns: A matplotlib Figure without writing files.
+:raises TypeError: The input is not a DataFrame.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate a synthetic MaxQuant table in memory.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: Two hundred protein rows, including five flagged rows.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+maxquant is the default; fragpipe, diann and generic normalize their own column names. read_table detects CSV/TSV separation.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **`--format` value must match `_dispatch_import` keys exactly.** `proteomics_data_import.py` registers `maxquant`, `fragpipe`, `diann`, `generic`. An unknown value raises `ValueError("Unsupported format: ... Supported: ['maxquant', 'fragpipe', 'diann', 'generic']")`. There is no `spectronaut` importer — use `--format generic` for Spectronaut and rename columns yourself.
-- **`--input` REQUIRED unless `--demo`.** `proteomics_data_import.py` raises `ValueError("--input required when not using --demo")`. Non-existent paths raise `FileNotFoundError` from `pd.read_csv`.
-- **Output schema is LOWERCASE.** Column renaming targets `protein_id`, `intensity_<sample>`, `gene_name` etc. Downstream skills (`proteomics-quantification`, `proteomics-de`) assume this casing. Verify after import with `head tables/proteins.csv`.
-- **No deduplication of contaminants / decoys.** Contaminant (`CON_*`) and decoy (`REV_*`) rows are passed through unchanged. Filter them upstream with the search engine's `--keep-contaminants false` flag, or add a downstream `df = df[~df["protein_id"].str.startswith(("CON_", "REV_"))]` step.
+- standardize filters MaxQuant Reverse, Potential contaminant and Only identified by site flags. Generic import does not infer those flags.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/proteins.csv
+- report.md
+- result.json
+- `demo_proteinGroups.txt` is written only with `--demo`.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo (synthetic MaxQuant-style)
-python skills/proteomics/proteomics-data-import/proteomics_data_import.py --demo --output /tmp/import_demo
-
-# Real MaxQuant output
-python skills/proteomics/proteomics-data-import/proteomics_data_import.py \
-  --input proteinGroups.txt --output results/ --format maxquant
-
-# FragPipe combined_protein
-python skills/proteomics/proteomics-data-import/proteomics_data_import.py \
-  --input combined_protein.tsv --output results/ --format fragpipe
-
-# DIA-NN main report
-python skills/proteomics/proteomics-data-import/proteomics_data_import.py \
-  --input report.tsv --output results/ --format diann
-
-# Generic / Spectronaut (rename columns yourself first)
-python skills/proteomics/proteomics-data-import/proteomics_data_import.py \
-  --input my_table.csv --output results/ --format generic
+python skills/proteomics/proteomics-data-import/proteomics_data_import.py --demo --output /tmp/proteomics_data_import
 ```
+
+For real input replace `--demo` with `--input <table>`.
+
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — per-format column-mapping rules
-- `references/output_contract.md` — `tables/proteins.csv` schema
-- Adjacent skills: `proteomics-ms-qc` (downstream — QC the imported table), `proteomics-quantification` (downstream — compute LFQ / iBAQ / spectral count), `proteomics-identification` (parallel — peptide-level summary), `proteomics-de` (downstream — differential abundance after import)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

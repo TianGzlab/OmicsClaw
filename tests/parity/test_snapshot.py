@@ -9,6 +9,15 @@ import pytest
 import signal
 
 
+def test_declared_root_tables_participate_in_numeric_parity(tmp_path):
+    output = tmp_path / 'out'
+    output.mkdir()
+    (output / 'result.json').write_text('{"summary": {}}')
+    (output / 'cosinor_results.csv').write_text('gene,amplitude\na,2\n')
+    snapshot.extract(output, tmp_path / 'snap', root_tables=('cosinor_results.csv',))
+    assert (tmp_path / 'snap/tables/cosinor_results.csv').read_text() == 'gene,amplitude\na,2\n'
+
+
 def test_exclusions_remove_only_named_columns_and_files(tmp_path):
     left, right = tmp_path / "left", tmp_path / "right"
     for folder, score in ((left, 1), (right, 2)):

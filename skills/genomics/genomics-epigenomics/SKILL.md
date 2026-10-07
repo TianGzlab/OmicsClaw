@@ -19,67 +19,110 @@ tags:
 
 ## When to use
 
-The user has a peak file (BED, narrowPeak, or broadPeak) from
-ATAC-seq, ChIP-seq, or CUT&Tag and wants peak summary statistics:
-total peak count, median / mean width, per-chromosome distribution,
-optional score column statistics. The script consumes peak files —
-it does NOT call peaks from BAM. `--method` (`macs2` / `macs3` /
-`homer` / `genrich`) and `--assay` (`chip-seq` / `atac-seq` /
-`cut-tag`) are recorded as metadata only.
+Load this skill for the file-based analysis named in the description.
+The function library and CLI share the same calculations; no external
+aligner, assembler, caller or annotation service is started.
 
-For single-cell ATAC processing use `scatac-preprocessing`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("genomics-epigenomics")
+data = read_input("input.bed", reader=library.read_records)
+result = library.analyze(data)
+write_output(result, "tables/result.csv")
+write_output(library.distribution_figure(result), "figures/distribution.png")
+```
 
-**Inputs**
+Run `examples/example_step.py` through the step runner for a small,
+hand-worked synthetic fixture. It asserts known summary values.
+The reader materializes the input in memory; use bounded FASTQ reads or
+pre-filter large genomic files before loading them.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_records(path: str | Path) -> pd.DataFrame`
+
+Read records through read_input(path, reader=library.read_records).
+
+:param path: Existing input file in the format documented under Inputs and outputs.
+:returns: Parsed records as a DataFrame.
+:raises ValueError: Input values or file structure cannot be parsed.
+
+### `analyze(data: pd.DataFrame, *, assay: str='chip-seq') -> pd.DataFrame`
+
+Compute epigenomics summaries and return a new table, leaving data unchanged.
+
+:param data: Records containing chrom, start, end.
+:param assay: CLI default chip-seq; atac-seq and cut-tag change descriptive expectations.
+:returns: Result table with diagnostics and summary in attrs['run_info'].
+:raises ValueError: Required columns are absent or records are empty or invalid.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return the analysis diagnostics and summary.
+
+:param data: Result returned by analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: analyze has not populated diagnostics.
+
+### `distribution_figure(data: pd.DataFrame)`
+
+Plot width values without writing files.
+
+:param data: Result table containing width.
+:returns: Matplotlib Figure.
+:raises ValueError: The value column is absent or the table is empty.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`analyze` returns a new DataFrame and leaves the input unchanged.
+`run_info(result)` returns the summary and method diagnostics.
+The CLI passes `keep=False` so diagnostics do not enter output tables.
+All calculations are deterministic; synthetic CLI demos retain seed 42.
+
+## Gotchas
+
+- `analyze` uses BED zero-based, half-open coordinates and recomputes width as end minus start. It does not call peaks.
+- `run_info()["summary"]` retains the legacy p/q-value heuristic: medians above 1 are treated as negative-log10 values. Convert or inspect inputs before interpreting significance.
+- `read_records` treats a .csv suffix as CSV and other suffixes as BED/narrowPeak. `assay` only changes descriptive expectations.
+
+## Inputs and outputs
+
+Input files:
 
 - Modalities: atac-seq, chip-seq
 - File types: `.bed`, `.narrowpeak`, `.csv`
 
-**Outputs**
+CLI output files:
 
 - `tables/peaks_per_chromosome.csv`
 - `tables/peaks_summary.csv`
 - `report.md`
 - `result.json`
 
-## Flow
+The library writes no files. Steps use `write_output`; the CLI owns the
+listed artifacts. Public figure functions return matplotlib Figures and
+do not add new CLI outputs.
 
-1. Load peak file (`--input <peaks.bed|narrowPeak>`) or generate a demo at `output_dir/demo_peaks.narrowPeak` (`genomics_epigenomics.py`).
-2. Parse coordinates; compute per-peak width.
-3. Aggregate per-chromosome counts; per-`--assay` expected-width range is added to the report (`genomics_epigenomics.py`).
-4. Write `tables/peaks_summary.csv` (`genomics_epigenomics.py`) + `tables/peaks_per_chromosome.csv` + `report.md` + `result.json`.
-
-## Gotchas
-
-- **No peak caller is invoked.** This skill summarises an existing BED/narrowPeak file — it does NOT run MACS / Genrich. Run them upstream and feed the output here.
-- **`--method` is metadata-only; `--assay` changes the report.** `--method` is recorded in `result.json` only. `--assay` controls the per-assay expected-peak-width range injected into the summary (`genomics_epigenomics.py`) — `chip-seq` reports 200-2000 bp, `atac-seq` 150-500 bp, `cut-tag` 150-300 bp. Peak parsing itself is identical across assays.
-- **`--input` REQUIRED unless `--demo`.** `genomics_epigenomics.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`.
-- **3-column BED has no score column.** Without a score (col 5 in BED6 / narrowPeak), the summary statistics for "score" are NaN. Pre-convert to narrowPeak or BED6 for score-aware stats. Note: broadPeak's "signalValue" (col 7) and qValue (col 9) are NOT read — the parser only handles up to BED6 plus the narrowPeak 10-col extension.
-- **Coordinate convention is 0-based half-open (BED).** Width = `end - start`. If your input uses 1-based closed coordinates, widths are off-by-one.
-- **Demo BED has 500 fixed-pattern peaks.** Useful for smoke tests; not biologically meaningful.
-
-## Key CLI
+## CLI
 
 ```bash
-# Demo
-python skills/genomics/genomics-epigenomics/genomics_epigenomics.py --demo --output /tmp/epi_demo
-
-# Real ATAC-seq peaks
-python skills/genomics/genomics-epigenomics/genomics_epigenomics.py \
-  --input sample_peaks.narrowPeak --output results/ \
-  --assay atac-seq --method macs3
+python skills/genomics/genomics-epigenomics/genomics_epigenomics.py --input input_file --output results/
+python skills/genomics/genomics-epigenomics/genomics_epigenomics.py --demo --output /tmp/genomics_epigenomics_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — peak-file format conventions, score interpretation
-- `references/output_contract.md` — `tables/peaks_summary.csv` + per-chromosome
-- Adjacent skills: `scatac-preprocessing` (parallel — single-cell ATAC), `genomics-alignment` (upstream — BAMs feed peak callers), `genomics-qc` (upstream — FASTQ QC before alignment), `bulkrna-de` (parallel — bulk RNA-seq differential expression)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

@@ -1,25 +1,8 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   └── pca_scores.png            (best-effort, ≥ 3 samples per group)
-└── tables/
-    ├── differential_features.csv
-    └── significant_features.csv
-```
+`tables/differential_features.csv`, `report.md` and `result.json`. The CLI also writes `tables/significant_features.csv` and, when PCA succeeds, `figures/pca_scores.png`. Demo mode also writes its synthetic input CSV at the output root.
 
-## File contents
+The function library returns tables and Figures without file writes.
+`run_info` reads DataFrame diagnostics; `keep=False` removes them.
 
-- `tables/differential_features.csv` — per-feature univariate t-test result with columns including `feature`, `group_a_mean`, `group_b_mean`, `log2fc`, `pvalue`, `fdr` (BH-adjusted). Written at `met_diff.py:301`.
-- `tables/significant_features.csv` — subset filtered by HARD-CODED `fdr < 0.05` (no `--alpha` flag). Written at `met_diff.py:305`.
-- `figures/pca_scores.png` — 2D PCA scatter colored by group, written best-effort by `run_pca` (`met_diff.py:216`); silently skipped on small inputs.
-- `report.md` — run parameters (group prefixes) plus significance counts.
-- `result.json` — `summary` includes `n_features`, `n_significant`, group sizes.
-
-## Notes
-
-- FDR threshold is hard-coded at 0.05 (use `metabolomics-statistics` for tunable `--alpha`).
-- Test backend is fixed at Welch t-test (use `metabolomics-statistics` for Wilcoxon / ANOVA / Kruskal).
+`differential_expression` treats the first column as feature IDs. Both groups must be nonempty and disjoint. `tables/significant_features.csv` uses fdr < 0.05. The CLI logs optional PCA failures.

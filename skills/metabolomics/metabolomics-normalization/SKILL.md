@@ -17,74 +17,81 @@ tags:
 
 ## When to use
 
-The user has a feature × sample metabolomics intensity table and
-wants normalisation only (no imputation). Five methods:
+Normalize a numeric feature-by-sample table. Use metabolomics-quantification when missing-value imputation is also needed.
 
-- `median` (default) — divide each sample by its median.
-- `quantile` — quantile normalisation across samples.
-- `total` — divide by per-sample total (TIC).
-- `pqn` — Probabilistic Quotient Normalisation (Dieterle 2006).
-- `log` — log2(x+1) per-cell.
+## Use from a step
 
-For combined imputation + normalisation use `metabolomics-quantification`.
+```python
+import pandas as pd
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("metabolomics-normalization")
+data = read_input('features.csv', reader=lambda path: pd.read_csv(path, index_col=0))
+result = library.normalize(data)
+write_output(result, 'tables/result.csv')
+```
 
-## Inputs & Outputs
+[examples/example_step.py](examples/example_step.py) runs a seeded synthetic
+example through the step runner and writes a table and Figure. Computations
+return new DataFrames, leave the input unchanged and expose diagnostics through
+`run_info(result)`. Plotting functions write no files.
 
-**Inputs**
+## API
 
-- File types: `.csv`
-- Accepts artifact `metabolomics.peak_table` (`csv`)
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `normalize(data, *, method='median')`
 
-- `tables/normalized.csv`
-- `report.md`
-- `result.json`
-- Produces artifact `metabolomics.feature_matrix` as `tables/normalized.csv` (`csv`)
+Return a normalized copy, preserving feature and sample labels.
 
-## Flow
+:param data: Numeric feature-by-sample DataFrame; NaNs retain method semantics.
+:param method: CLI default median; quantile, total, pqn or log are alternatives.
+:returns: A new DataFrame with method and dimensions in attrs['run_info'].
+:raises ValueError: The requested method is unknown.
 
-1. Load CSV (`--input <features.csv>`) or generate a demo (`--demo`).
-2. Dispatch on `--method`; reject unknown via `ValueError("Unknown method: {method}. Choose from {SUPPORTED_METHODS}")` at `metabolomics_normalization.py`.
-3. Apply the chosen normalisation; write `tables/normalized.csv` (`metabolomics_normalization.py`) + `report.md` + `result.json`.
+### `run_info(data, *, keep=True)`
+
+Read diagnostics attached to a returned table.
+
+:param data: DataFrame returned by this library.
+:param keep: Default True; use False in the CLI to remove diagnostics.
+:returns: An independent dictionary describing the run.
+:raises ValueError: The table carries no run_info.
+
+### `distribution_figure(data)`
+
+Plot normalized sample distributions without writing a file.
+
+:param data: Numeric feature-by-sample DataFrame.
+:returns: A matplotlib Figure.
+:raises ValueError: No numeric columns are available.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Median and total scale each column to the median column median or sum. Quantile maps ranks to averaged sorted values. PQN uses a TIC-normalized reference to estimate quotients, then divides the original intensities. Log computes log2(x+1).
 
 ## Gotchas
 
-- **`--method` choices are exact: `median` / `quantile` / `total` / `pqn` / `log`.** `metabolomics_normalization.py` defines `SUPPORTED_METHODS`. Aliases like `tic` (= `total`) are NOT accepted — pass `total` explicitly. (Note: sibling `metabolomics-quantification` accepts `tic` as a normalize choice; the two skills' vocabularies differ.)
-- **`--input` REQUIRED unless `--demo`.** `metabolomics_normalization.py` raises `ValueError("--input required when not using --demo")`.
-- **`pqn` requires non-zero reference values.** Probabilistic Quotient Normalisation divides by per-feature reference (median sample); features with all zeros yield NaN quotients. Pre-filter zero-prevalent features.
-- **`log` is `log2(x+1)`.** Negative values raise / propagate NaN. Pre-clip upstream.
-- **No imputation is performed.** NaN values pass through normalisation untouched (most methods skipna; `quantile` may NaN-propagate). Pre-impute with `metabolomics-quantification` if NaNs are problematic.
-- **Method-specific behaviour with NaN may differ.** `median` / `total` use `np.nanmedian` / `np.nansum`; `quantile` may collapse rows with NaN; `pqn` expects all-numeric.
+- `normalize` preserves NaNs according to the method and performs no imputation. Zero divisors become NaN. The input index is retained in `tables/normalized.csv`.
 
-## Key CLI
+## Inputs and outputs
+
+CSV input; `tables/normalized.csv`, `report.md` and `result.json`. The CLI writes `reproducibility/commands.sh`.
+The function library returns objects; the CLI and step own file writes.
+
+## CLI
 
 ```bash
-# Demo (median normalize)
-python skills/metabolomics/metabolomics-normalization/metabolomics_normalization.py --demo --output /tmp/norm_demo
-
-# PQN
-python skills/metabolomics/metabolomics-normalization/metabolomics_normalization.py \
-  --input features.csv --output results/ --method pqn
-
-# Total (TIC)
-python skills/metabolomics/metabolomics-normalization/metabolomics_normalization.py \
-  --input features.csv --output results/ --method total
-
-# log2(x+1)
-python skills/metabolomics/metabolomics-normalization/metabolomics_normalization.py \
-  --input features.csv --output results/ --method log
+python skills/metabolomics/metabolomics-normalization/metabolomics_normalization.py --demo --output /tmp/metabolomics_normalization
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — per-method semantics, when each wins
-- `references/output_contract.md` — `tables/normalized.csv` schema
-- Adjacent skills: `metabolomics-quantification` (parallel — combined impute + normalise), `metabolomics-xcms-preprocessing` (upstream), `metabolomics-peak-detection` (upstream), `metabolomics-statistics` (downstream — multi-group testing), `metabolomics-de` (downstream — two-group DE)
+- [Parameters](references/parameters.md)
+- [Methodology](references/methodology.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

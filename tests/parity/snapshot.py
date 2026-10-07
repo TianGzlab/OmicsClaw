@@ -51,6 +51,7 @@ class Case:
     exclude: dict[str, str] = field(default_factory=dict)
     input: Callable[[Path], None] | None = None
     environment: dict[str, str | None] = field(default_factory=dict)
+    root_tables: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -274,6 +275,19 @@ def _load_spatial_cases() -> None:
 
 _load_spatial_cases()
 
+
+def _load_remaining_cases() -> None:
+    from importlib import import_module
+
+    for domain in ("bulkrna", "genomics", "proteomics", "metabolomics", "literature",
+                   "bulkrna_read", "bulkrna_r", "bulkrna_network"):
+        if (Path(__file__).parent / f"{domain}.py").is_file():
+            module = import_module(f"tests.parity.{domain}")
+            REGISTRY.update(module.register(Case, Skill))
+
+
+_load_remaining_cases()
+
 _DROPPED_SUMMARY_KEYS = {"completed_at", "elapsed_seconds", "runtime_seconds", "output_dir", "output_h5ad",
                          "input_file", "standardized_at"}
 
@@ -416,7 +430,7 @@ def obs_frames(adata):
     return labels, numeric
 
 
-def extract(output: Path, target: Path) -> None:
+def extract(output: Path, target: Path, *, root_tables: tuple[str, ...] = ()) -> None:
     """Write the snapshot of the CLI output in *output* to *target*."""
     import anndata
 
@@ -429,6 +443,12 @@ def extract(output: Path, target: Path) -> None:
             destination = target / "tables" / csv.relative_to(tables)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(csv, destination)
+    for name in root_tables:
+        if Path(name).name != name or not name.endswith('.csv'):
+            raise ValueError('Root table names must be CSV basenames')
+        destination = target / 'tables' / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(output / name, destination)
     h5ad = output / "processed.h5ad"
     if h5ad.is_file():
         adata = anndata.read_h5ad(h5ad)
@@ -608,7 +628,7 @@ def compare_output(skill: str, case: str, output: Path) -> list[str]:
     """Differences between the recorded snapshot of *case* and the CLI output in *output*."""
     with tempfile.TemporaryDirectory(prefix="parity-") as scratch:
         snapshot = Path(scratch) / "snapshot"
-        extract(output, snapshot)
+        extract(output, snapshot, root_tables=REGISTRY[skill].cases[case].root_tables)
         return compare(golden_dir(skill, case), snapshot, **comparison_options(skill, case))
 
 
@@ -644,7 +664,7 @@ def record(skill: str, case: str) -> Path:
             if not recording_succeeded(skill, proc, output):
                 raise SystemExit(f"{skill} {case} failed:\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")
             path = scratch / f"snapshot-{number}"
-            extract(output, path)
+            extract(output, path, root_tables=REGISTRY[skill].cases[case].root_tables)
             snapshots.append(path)
         differences = compare(*snapshots, exclude=REGISTRY[skill].cases[case].exclude)
         target = golden_dir(skill, case)

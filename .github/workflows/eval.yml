@@ -82,7 +82,7 @@ jobs:
                       adata.write_h5ad(folder / f"{name}.h5ad")
           PY
       - name: Run each skill's example step through the step runner
-        run: pytest tests/sdk/notebook/test_skill_examples.py -m "skill_example and not skill_example_extended and not skill_example_spatial" -p no:cacheprovider
+        run: pytest tests/sdk/notebook/test_skill_examples.py -m "skill_example and not skill_example_extended and not skill_example_spatial and not skill_example_remaining" -p no:cacheprovider
       - name: Run migrated skill tests without CLI subprocesses
         run: >-
           pytest
@@ -165,6 +165,44 @@ jobs:
           pytest tests/sdk/notebook/test_skill_examples.py
           skills/spatial/spatial-enrichment/tests/test_reader_step.py
           -m skill_example_spatial -p no:cacheprovider
+
+  skill-examples-remaining:
+    name: Remaining modalities (API and replay gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMBA_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: remaining-modalities
+          python-version: "3.11"
+          channels: conda-forge,bioconda
+          channel-priority: strict
+      # Same R package names as environment.yml; WGCNA has no Python substitute.
+      - run: conda install -y r-base=4.3 r-matrix r-survival r-wgcna bioconductor-sva bioconductor-deseq2
+      - run: >-
+          pip install -e . pytest nbformat nbclient ipykernel
+          "numpy==2.0.2" "pandas>=2.2,<3" "anndata==0.12.11"
+          scipy scikit-learn matplotlib seaborn networkx "gseapy==1.2.1"
+          PyYAML requests rich
+      - name: Test the five domains through their public interfaces and CLI
+        run: >-
+          pytest skills/bulkrna skills/genomics skills/proteomics
+          skills/metabolomics skills/literature --import-mode=importlib
+          -m "not slow and not demo and not skill_example" -p no:cacheprovider
+      - name: Execute each remaining-modality example and replay in a fresh kernel
+        run: >-
+          pytest tests/sdk/notebook/test_skill_examples.py
+          -m skill_example_remaining -p no:cacheprovider
 
   skill-examples-extended:
     # Runs on every PR, but repository owners must not select it as a required check.

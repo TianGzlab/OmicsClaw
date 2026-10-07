@@ -71,402 +71,31 @@ def get_demo_data() -> tuple[pd.DataFrame, Path]:
 # R WGCNA integration
 # ---------------------------------------------------------------------------
 
-def _select_soft_threshold(
-    cor_matrix: np.ndarray,
-    powers: list[int] | None = None,
-) -> tuple[int, pd.DataFrame]:
-    """Test soft-thresholding powers and pick the best one.
 
-    For each candidate power, compute the adjacency matrix |cor|^power,
-    derive connectivity, and evaluate the scale-free topology fit (R^2 of
-    log(k) vs log(p(k))).
-
-    Parameters
-    ----------
-    cor_matrix : np.ndarray
-        Square gene-gene Pearson correlation matrix.
-    powers : list[int] | None
-        Candidate powers to evaluate.  Defaults to a standard WGCNA range.
-
-    Returns
-    -------
-    best_power : int
-        First power where R^2 > 0.8, or the power with the highest R^2.
-    fit_df : pd.DataFrame
-        Columns: power, r_squared, mean_connectivity.
-    """
-    if powers is None:
-        powers = [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20]
-
-    n_genes = cor_matrix.shape[0]
-    abs_cor = np.abs(cor_matrix)
-    records: list[dict] = []
-
-    for power in powers:
-        adjacency = abs_cor ** power
-        np.fill_diagonal(adjacency, 0.0)
-        connectivity = adjacency.sum(axis=0)
-        mean_k = float(np.mean(connectivity))
-
-        # Scale-free fit: R^2 of log10(k) vs log10(p(k))
-        k_vals = connectivity[connectivity > 0]
-        if len(k_vals) < 10:
-            records.append({
-                "power": power,
-                "r_squared": 0.0,
-                "mean_connectivity": round(mean_k, 4),
-            })
-            continue
-
-        # Bin connectivity into a histogram for p(k)
-        n_bins = max(10, int(np.sqrt(len(k_vals))))
-        hist, bin_edges = np.histogram(k_vals, bins=n_bins)
-        bin_centres = (bin_edges[:-1] + bin_edges[1:]) / 2.0
-
-        # Keep only bins with non-zero counts
-        mask = hist > 0
-        if mask.sum() < 3:
-            records.append({
-                "power": power,
-                "r_squared": 0.0,
-                "mean_connectivity": round(mean_k, 4),
-            })
-            continue
-
-        log_k = np.log10(bin_centres[mask])
-        log_pk = np.log10(hist[mask] / hist[mask].sum())
-
-        # Linear regression: R^2
-        if np.std(log_k) == 0:
-            r_sq = 0.0
-        else:
-            correlation = np.corrcoef(log_k, log_pk)[0, 1]
-            r_sq = float(correlation ** 2) if not np.isnan(correlation) else 0.0
-
-        records.append({
-            "power": power,
-            "r_squared": round(r_sq, 4),
-            "mean_connectivity": round(mean_k, 4),
-        })
-
-    fit_df = pd.DataFrame(records)
-
-    # Pick first power with R^2 > 0.8, otherwise the maximum
-    above = fit_df[fit_df["r_squared"] > 0.8]
-    if len(above) > 0:
-        best_power = int(above.iloc[0]["power"])
-    else:
-        best_power = int(fit_df.loc[fit_df["r_squared"].idxmax(), "power"])
-
-    logger.info(
-        "Selected soft-threshold power=%d (R^2=%.3f, mean_k=%.1f)",
-        best_power,
-        float(fit_df.loc[fit_df["power"] == best_power, "r_squared"].iloc[0]),
-        float(fit_df.loc[fit_df["power"] == best_power, "mean_connectivity"].iloc[0]),
-    )
-    return best_power, fit_df
 
 
 # ---------------------------------------------------------------------------
 # Module detection
 # ---------------------------------------------------------------------------
 
-def _detect_modules(
-    cor_matrix: np.ndarray,
-    power: int,
-    min_module_size: int = 10,
-) -> np.ndarray:
-    """Detect co-expression modules using TOM-based hierarchical clustering.
 
-    Parameters
-    ----------
-    cor_matrix : np.ndarray
-        Square gene-gene Pearson correlation matrix.
-    power : int
-        Soft-thresholding power.
-    min_module_size : int
-        Minimum genes per module; smaller clusters go to module 0 (unassigned).
-
-    Returns
-    -------
-    np.ndarray
-        Integer module labels (0 = unassigned).
-    """
-    n = cor_matrix.shape[0]
-    abs_cor = np.abs(cor_matrix)
-    adjacency = abs_cor ** power
-    np.fill_diagonal(adjacency, 0.0)
-
-    # Connectivity per gene
-    k = adjacency.sum(axis=0)
-
-    # Topological Overlap Matrix (TOM)
-    # TOM_ij = (sum_u(a_iu * a_uj) + a_ij) / (min(k_i, k_j) + 1 - a_ij)
-    numerator = adjacency @ adjacency + adjacency
-    min_k = np.minimum(k[:, None], k[None, :])
-    denominator = min_k + 1.0 - adjacency
-
-    # Avoid division by zero
-    denominator[denominator < 1e-12] = 1e-12
-    tom = numerator / denominator
-    np.fill_diagonal(tom, 1.0)
-
-    # Clip to [0, 1] for numerical safety
-    tom = np.clip(tom, 0.0, 1.0)
-
-    # TOM-based dissimilarity
-    dist_matrix = 1.0 - tom
-    np.fill_diagonal(dist_matrix, 0.0)
-
-    # Convert to condensed distance for scipy
-    dist_condensed = squareform(dist_matrix, checks=False)
-
-    # Hierarchical clustering (average linkage, as in WGCNA)
-    Z = linkage(dist_condensed, method="average")
-
-    # Dynamic tree cut: use a fixed height threshold
-    # Pick a threshold that gives reasonable module count
-    # Try multiple thresholds and pick one giving between 2 and 30 modules
-    best_labels = None
-    best_n_modules = 0
-
-    for threshold in np.arange(0.80, 0.99, 0.02):
-        labels = fcluster(Z, t=threshold, criterion="distance")
-        # Count modules meeting min size
-        unique, counts = np.unique(labels, return_counts=True)
-        n_valid = int((counts >= min_module_size).sum())
-        if 2 <= n_valid <= 30:
-            best_labels = labels
-            best_n_modules = n_valid
-            break
-
-    if best_labels is None:
-        # Fallback: use a moderate threshold
-        best_labels = fcluster(Z, t=0.90, criterion="distance")
-
-    # Relabel: assign small modules to 0 (unassigned), renumber the rest from 1
-    unique, counts = np.unique(best_labels, return_counts=True)
-    module_map: dict[int, int] = {}
-    next_id = 1
-    for label, count in sorted(zip(unique, counts), key=lambda x: -x[1]):
-        if count >= min_module_size:
-            module_map[label] = next_id
-            next_id += 1
-        else:
-            module_map[label] = 0
-
-    modules = np.array([module_map[lbl] for lbl in best_labels])
-    n_assigned = int((modules > 0).sum())
-    n_unassigned = int((modules == 0).sum())
-    n_modules = len(set(modules)) - (1 if 0 in modules else 0)
-    logger.info(
-        "Detected %d modules (%d genes assigned, %d unassigned)",
-        n_modules, n_assigned, n_unassigned,
-    )
-    return modules
 
 
 # ---------------------------------------------------------------------------
 # Hub gene detection
 # ---------------------------------------------------------------------------
 
-def _find_hub_genes(
-    cor_matrix: np.ndarray,
-    modules: np.ndarray,
-    gene_names: list[str],
-    power: int,
-    n_hubs: int = 5,
-) -> dict:
-    """Identify hub genes per module by combined kWithin and module membership.
 
-    Hub gene score = |module_membership| * kWithin_normalized, following
-    Biomni/WGCNA best practices. Module membership (MM) is the Pearson
-    correlation between gene expression and the module eigengene.
-
-    Parameters
-    ----------
-    cor_matrix : np.ndarray
-        Gene-gene Pearson correlation matrix.
-    modules : np.ndarray
-        Module labels (0 = unassigned).
-    gene_names : list[str]
-        Gene names in the same order as the correlation matrix.
-    power : int
-        Soft-thresholding power.
-    n_hubs : int
-        Number of top hub genes to return per module.
-
-    Returns
-    -------
-    dict
-        Mapping of module_id -> list of top hub gene names.
-    """
-    abs_cor = np.abs(cor_matrix)
-    adjacency = abs_cor ** power
-    np.fill_diagonal(adjacency, 0.0)
-
-    hub_genes: dict[int, list[str]] = {}
-    unique_modules = sorted(set(modules))
-
-    for mod_id in unique_modules:
-        if mod_id == 0:
-            continue
-        indices = np.where(modules == mod_id)[0]
-        if len(indices) < 2:
-            hub_genes[mod_id] = [gene_names[i] for i in indices]
-            continue
-
-        # Intra-module connectivity (kWithin)
-        sub_adj = adjacency[np.ix_(indices, indices)]
-        intra_k = sub_adj.mean(axis=1)
-        kWithin_norm = intra_k / (intra_k.max() + 1e-10)
-
-        # Module membership: cor(gene_expr, module_eigengene)
-        # Module eigengene = first PC of module expression
-        sub_cor = cor_matrix[np.ix_(indices, indices)]
-        try:
-            eigvals, eigvecs = np.linalg.eigh(sub_cor)
-            eigengene = eigvecs[:, -1]  # first PC
-            mm = np.abs(eigengene)
-            mm_norm = mm / (mm.max() + 1e-10)
-        except np.linalg.LinAlgError:
-            mm_norm = np.ones(len(indices))
-
-        # Combined hub score
-        hub_score = mm_norm * kWithin_norm
-
-        # Sort by descending hub score
-        top_idx = np.argsort(-hub_score)[: min(n_hubs, len(indices))]
-        hub_genes[mod_id] = [gene_names[indices[i]] for i in top_idx]
-
-    return hub_genes
 
 
 # ---------------------------------------------------------------------------
 # Core analysis
 # ---------------------------------------------------------------------------
 
-def core_analysis(
-    counts: pd.DataFrame,
-    *,
-    power: int | None = None,
-    min_module_size: int = 10,
-    method: str = "wgcna",
-) -> dict:
-    """Run WGCNA co-expression analysis via R.
-
-    Parameters
-    ----------
-    counts : pd.DataFrame
-        Genes-by-samples count matrix.  First column is gene identifiers,
-        remaining columns are sample counts.
-    power : int | None
-        Soft-thresholding power.  Auto-selected if None.
-    min_module_size : int
-        Minimum genes per module.
-    method : str
-        "wgcna" for R WGCNA (primary and recommended).
-
-    Returns
-    -------
-    dict
-        Summary with keys: n_genes_used, n_samples, soft_power, n_modules,
-        module_sizes, hub_genes, module_assignments, threshold_fit_df.
-    """
-    # Sample size validation (from Biomni wgcna-best-practices.md)
-    gene_col = counts.columns[0]
-    sample_cols = [c for c in counts.columns if c != gene_col]
-    n_samples = len(sample_cols)
-    if n_samples < 8:
-        raise ValueError(
-            f"WGCNA requires >= 8 samples (got {n_samples}). "
-            "Co-expression networks are unreliable with too few samples."
-        )
-    elif n_samples < 15:
-        logger.warning(
-            "Low sample count (%d). WGCNA recommends >= 15 samples for "
-            "reliable module detection.", n_samples,
-        )
-
-    try:
-        return _run_wgcna_r(counts, min_module_size=min_module_size)
-    except Exception as exc:
-        raise RuntimeError(
-            f"R WGCNA failed: {exc}. "
-            "Ensure R is installed with WGCNA package: "
-            "BiocManager::install('WGCNA')"
-        ) from exc
 
 
-def _run_wgcna_r(counts: pd.DataFrame, *, min_module_size: int = 30) -> dict:
-    """Run real WGCNA in R via subprocess."""
-    import json
-    import tempfile
-    from skills._sdk.deps import validate_r_environment
-    from skills._sdk.r_script_runner import RScriptRunner
-    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
-    validate_r_environment(required_r_packages=["WGCNA"])
 
-    scripts_dir = _SDK_R_SCRIPTS_DIR
-    runner = RScriptRunner(scripts_dir=scripts_dir)
-
-    gene_col = counts.columns[0]
-    counts_for_r = counts.set_index(gene_col)
-
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_wgcna_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        counts_for_r.to_csv(tmpdir / "counts.csv")
-
-        output_dir = tmpdir / "output"
-        output_dir.mkdir()
-
-        runner.run_script(
-            "bulkrna_wgcna.R",
-            args=[str(tmpdir / "counts.csv"), str(output_dir),
-                  str(min_module_size)],
-            expected_outputs=["gene_modules.csv", "hub_genes.csv"],
-            output_dir=output_dir,
-        )
-
-        gene_modules = pd.read_csv(output_dir / "gene_modules.csv")
-        hub_genes_df = pd.read_csv(output_dir / "hub_genes.csv")
-
-        info = {}
-        info_path = output_dir / "wgcna_info.json"
-        if info_path.exists():
-            with open(info_path) as f:
-                info = json.load(f)
-
-        # Build module assignments dict
-        module_assignments = dict(zip(gene_modules["gene"], gene_modules["module"]))
-
-        # Module sizes
-        mod_counts = gene_modules["module"].value_counts()
-        module_sizes = {str(m): int(c) for m, c in mod_counts.items() if m != "grey"}
-
-        # Hub genes per module
-        hub_genes = {}
-        for mod, grp in hub_genes_df.groupby("module"):
-            hub_genes[mod] = grp["gene"].tolist()
-
-        # Read threshold fit if available
-        fit_df = None
-        fit_path = output_dir / "soft_power_table.csv"
-        if fit_path.exists():
-            fit_df = pd.read_csv(fit_path)
-
-    return {
-        "n_genes_used": len(gene_modules),
-        "n_samples": info.get("n_samples", counts_for_r.shape[1]),
-        "soft_power": info.get("soft_power", 0),
-        "n_modules": info.get("n_modules", len(module_sizes)),
-        "module_sizes": module_sizes,
-        "hub_genes": hub_genes,
-        "module_assignments": module_assignments,
-        "threshold_fit_df": fit_df,
-        "method_used": "wgcna",
-    }
 
 # ---------------------------------------------------------------------------
 # Figures
@@ -521,16 +150,16 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
     # --- Module sizes bar chart ---
     fig, ax = plt.subplots(figsize=(8, 5))
     mod_ids = sorted(module_sizes.keys())
-    labels = [f"M{m}" if m > 0 else "Unassigned" for m in mod_ids]
+    labels = [str(m) for m in mod_ids]
     sizes = [module_sizes[m] for m in mod_ids]
 
     # Color palette: grey for unassigned, tab colours for the rest
-    n_colored = len([m for m in mod_ids if m > 0])
-    cmap = plt.cm.get_cmap("tab20", max(n_colored, 1))
+    n_colored = len([m for m in mod_ids if m != "grey"])
+    cmap = matplotlib.colormaps["tab20"].resampled(max(n_colored, 1))
     colors = []
     color_idx = 0
     for m in mod_ids:
-        if m == 0:
+        if m == "grey":
             colors.append("lightgrey")
         else:
             colors.append(cmap(color_idx % 20))
@@ -553,9 +182,11 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
     fig, ax = plt.subplots(figsize=(10, 2))
     assignments = summary["module_assignments"]
     gene_order = sorted(assignments.keys(), key=lambda g: assignments[g])
-    mod_values = [assignments[g] for g in gene_order]
+    color_codes = {color: number + 1 for number, color in enumerate(sorted(set(assignments.values()) - {"grey"}))}
+    color_codes["grey"] = 0
+    mod_values = [color_codes[assignments[g]] for g in gene_order]
 
-    cmap_full = plt.cm.get_cmap("tab20", max(summary["n_modules"] + 1, 2))
+    cmap_full = matplotlib.colormaps["tab20"].resampled(max(summary["n_modules"] + 1, 2))
     color_array = []
     for v in mod_values:
         if v == 0:
@@ -615,7 +246,7 @@ def write_report(
         "|--------|------|",
     ]
     for mod_id in sorted(summary["module_sizes"].keys()):
-        label = f"M{mod_id}" if mod_id > 0 else "Unassigned"
+        label = str(mod_id)
         body_lines.append(f"| {label} | {summary['module_sizes'][mod_id]} |")
 
     body_lines.extend(["", "### Hub Genes\n"])
@@ -662,7 +293,7 @@ def write_report(
     for mod_id, genes in summary["hub_genes"].items():
         for rank, gene in enumerate(genes, 1):
             hub_records.append({"module": mod_id, "rank": rank, "gene": gene})
-    hub_df = pd.DataFrame(hub_records)
+    hub_df = pd.DataFrame(hub_records, columns=["module", "rank", "gene"])
     hub_df.to_csv(tables_dir / "hub_genes.csv", index=False)
 
     # Threshold fit
@@ -730,11 +361,12 @@ def main():
         counts = pd.read_csv(data_path)
         input_file = str(data_path)
 
-    summary = core_analysis(
-        counts,
-        power=args.power,
-        min_module_size=args.min_module_size,
-    )
+    from skills._sdk.notebook import load_skill
+    api = load_skill(SKILL_NAME)
+    table = api.analyze(counts.set_index(counts.columns[0]), power=args.power, min_module_size=args.min_module_size)
+    diagnostics = api.run_info(table, keep=False)
+    summary = diagnostics.pop("summary")
+    summary["threshold_fit_df"] = api.threshold_fit(table)
 
     figures = generate_figures(output_dir, summary)
     logger.info("Generated %d figures.", len(figures))
@@ -743,6 +375,7 @@ def main():
         "power": args.power,
         "min_module_size": args.min_module_size,
         "input_file": input_file,
+        "run_info": diagnostics,
     }
     write_report(
         output_dir, summary,

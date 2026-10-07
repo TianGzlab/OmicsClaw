@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Genomics Variant Annotation — Functional impact prediction for variants.
-
-Implements a rule-based variant annotation engine that predicts functional
-consequences based on variant type, genomic context (exonic/intronic/
-intergenic), and known functional databases (SIFT, PolyPhen, CADD).
-
-In production, wraps Ensembl VEP, SnpEff, or ANNOVAR for annotation.
-The demo mode generates realistic variant annotations with impact categories.
-
-Usage:
-    python variant_annotation.py --input <file.vcf> --output <dir>
-    python variant_annotation.py --demo --output <dir>
-"""
+"""Genomics variant-annotation: summarize existing local files.\n\nThe CLI owns demo generation, reports and file output. Its function library\ncontains the computations. No external analysis tool is started."""
 
 from __future__ import annotations
 
@@ -21,7 +9,6 @@ import random
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 _SDK_ANCHOR = next(
@@ -37,7 +24,6 @@ from skills._sdk.report import (
 )
 from skills._sdk.result import write_result_json
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "genomics-variant-annotation"
@@ -236,48 +222,6 @@ def generate_demo_annotations(output_dir: Path, n_variants: int = 300) -> tuple[
 
 # ---------------------------------------------------------------------------
 # Report
-# ---------------------------------------------------------------------------
-
-def compute_annotation_stats(df: pd.DataFrame) -> dict:
-    """Compute annotation summary statistics."""
-    impact_counts = df["impact"].value_counts().to_dict()
-    consequence_counts = df["consequence"].value_counts().to_dict()
-
-    stats = {
-        "n_variants": len(df),
-        "n_high_impact": int(impact_counts.get("HIGH", 0)),
-        "n_moderate_impact": int(impact_counts.get("MODERATE", 0)),
-        "n_low_impact": int(impact_counts.get("LOW", 0)),
-        "n_modifier_impact": int(impact_counts.get("MODIFIER", 0)),
-        "top_consequences": dict(
-            sorted(consequence_counts.items(), key=lambda x: -x[1])[:10]
-        ),
-        "n_genes_affected": int(df[df["gene"] != "."]["gene"].nunique()),
-    }
-
-    # SIFT/PolyPhen stats for missense variants
-    missense = df[df["consequence"] == "missense_variant"]
-    if len(missense) > 0:
-        sift_del = (missense["sift_prediction"] == "deleterious").sum()
-        pp_dam = missense["polyphen_prediction"].isin(
-            ["probably_damaging", "possibly_damaging"]
-        ).sum()
-        stats["n_missense"] = len(missense)
-        stats["n_sift_deleterious"] = int(sift_del)
-        stats["n_polyphen_damaging"] = int(pp_dam)
-    else:
-        stats["n_missense"] = 0
-        stats["n_sift_deleterious"] = 0
-        stats["n_polyphen_damaging"] = 0
-
-    # CADD summary
-    cadd_vals = pd.to_numeric(df["cadd_phred"], errors="coerce").dropna()
-    if len(cadd_vals) > 0:
-        stats["mean_cadd_phred"] = round(float(cadd_vals.mean()), 1)
-        stats["n_cadd_above_20"] = int((cadd_vals >= 20).sum())
-        stats["n_cadd_above_30"] = int((cadd_vals >= 30).sum())
-
-    return stats
 
 
 def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
@@ -333,6 +277,7 @@ def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Genomics Variant Annotation")
     parser.add_argument("--input", dest="input_path", help="Input VCF or annotated CSV file")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
@@ -361,7 +306,10 @@ def main():
             raise ValueError(f"Could not parse input file: {input_path}. "
                              "Expected CSV with chrom/pos/ref/alt/consequence/impact columns.")
 
-    stats = compute_annotation_stats(df)
+    from skills._sdk.notebook import load_skill
+    api = load_skill(SKILL_NAME)
+    df = api.analyze(df)
+    stats = api.run_info(df, keep=False)["summary"]
 
     # Save tables
     tables_dir = output_dir / "tables"

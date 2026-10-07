@@ -195,6 +195,30 @@ DEPENDENCIES: dict[str, dict] = {
         "install": 'Rscript -e \'install.packages("MetaboAnalystR")\'',
         "description": "MetaboAnalyst via native R scripts",
     },
+    "DESeq2": {
+        "module": "DESeq2",
+        "kind": "r",
+        "install": 'Rscript -e \'BiocManager::install("DESeq2")\'',
+        "description": "Bulk count differential expression in R",
+    },
+    "sva": {
+        "module": "sva",
+        "kind": "r",
+        "install": 'Rscript -e \'BiocManager::install("sva")\'',
+        "description": "ComBat batch correction in R",
+    },
+    "survival": {
+        "module": "survival",
+        "kind": "r",
+        "install": 'Rscript -e \'install.packages("survival")\'',
+        "description": "Survival curves and Cox regression in R",
+    },
+    "WGCNA": {
+        "module": "WGCNA",
+        "kind": "r",
+        "install": 'Rscript -e \'BiocManager::install("WGCNA")\'',
+        "description": "Weighted gene coexpression analysis in R",
+    },
     "Matrix": {
         "module": "Matrix",
         "kind": "r",

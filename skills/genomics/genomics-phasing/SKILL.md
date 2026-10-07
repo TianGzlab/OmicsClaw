@@ -18,23 +18,87 @@ tags:
 
 ## When to use
 
-The user has a phased VCF (from WhatsHap, SHAPEIT5, Eagle2, etc.)
-and wants phasing QC: total het count, phased fraction, phase-block
-count, phase-block N50 (in bp), per-block sizes. Phasing detection
-relies on the `PS` (Phase Set) FORMAT field plus pipe-delimited
-genotype encoding (`0|1` vs `0/1`).
+Load this skill for the file-based analysis named in the description.
+The function library and CLI share the same calculations; no external
+aligner, assembler, caller or annotation service is started.
 
-This skill does NOT phase variants — it summarises a VCF that has
-already been phased.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("genomics-phasing")
+data = read_input("input.vcf", reader=library.read_records)
+result = library.analyze(data)
+write_output(result, "tables/result.csv")
+write_output(library.distribution_figure(result), "figures/distribution.png")
+```
 
-**Inputs**
+Run `examples/example_step.py` through the step runner for a small,
+hand-worked synthetic fixture. It asserts known summary values.
+The reader materializes the input in memory; use bounded FASTQ reads or
+pre-filter large genomic files before loading them.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_records(path: str | Path) -> pd.DataFrame`
+
+Read records through read_input(path, reader=library.read_records).
+
+:param path: Existing input file in the format documented under Inputs and outputs.
+:returns: Parsed records as a DataFrame.
+:raises ValueError: Input values or file structure cannot be parsed.
+
+### `analyze(data: pd.DataFrame) -> pd.DataFrame`
+
+Compute phasing summaries and return a new table, leaving data unchanged.
+
+:param data: Records containing chrom, pos, gt, is_phased, is_het, phase_set.
+
+:returns: Result table with diagnostics and summary in attrs['run_info'].
+:raises ValueError: Required columns are absent or records are empty or invalid.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return the analysis diagnostics and summary.
+
+:param data: Result returned by analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: analyze has not populated diagnostics.
+
+### `distribution_figure(data: pd.DataFrame)`
+
+Plot pos values without writing files.
+
+:param data: Result table containing pos.
+:returns: Matplotlib Figure.
+:raises ValueError: The value column is absent or the table is empty.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`analyze` returns a new DataFrame and leaves the input unchanged.
+`run_info(result)` returns the summary and method diagnostics.
+The CLI passes `keep=False` so diagnostics do not enter output tables.
+All calculations are deterministic; synthetic CLI demos retain seed 42.
+
+## Gotchas
+
+- `read_records` reads only the first sample. The legacy heterozygous classification recognizes 0/1, 1/0, 0|1 and 1|0; other allele combinations are not included.
+- `run_info()["summary"]["n_phase_blocks"]` excludes singleton blocks. Missing PS uses the position as a singleton phase set.
+- `analyze` summarizes existing phasing; it does not phase variants or estimate switch-error rates.
+
+## Inputs and outputs
+
+Input files:
 
 - File types: `.vcf`
 - Accepts artifact `genomics.filtered_variants` (`vcf`)
 
-**Outputs**
+CLI output files:
 
 - `tables/phase_blocks.csv`
 - `tables/phased_variants.csv`
@@ -42,43 +106,23 @@ already been phased.
 - `result.json`
 - Produces artifact `genomics.phased_variants` as `tables/phased_variants.csv` (`csv`)
 
-## Flow
+The library writes no files. Steps use `write_output`; the CLI owns the
+listed artifacts. Public figure functions return matplotlib Figures and
+do not add new CLI outputs.
 
-1. Load VCF (`--input <phased.vcf>`) or generate a demo phased VCF at `output_dir/demo_phased.vcf` with `--n-variants` records (`genomics_phasing.py`).
-2. Parse records; classify each het as phased (`|` in GT and `PS` populated) or unphased (`/`).
-3. Group phased variants by `PS`; compute per-block start / end / length / variant count.
-4. Compute phase-block N50 (bp); phased fraction across all hets.
-5. Write `tables/phased_variants.csv` (`genomics_phasing.py`) + `tables/phase_blocks.csv` + `report.md` + `result.json`.
-
-## Gotchas
-
-- **No phaser is invoked.** This skill ingests an already-phased VCF — it does not run WhatsHap / SHAPEIT5 / Eagle2. Run a phaser upstream and feed its VCF here.
-- **`--input` REQUIRED unless `--demo`.** `genomics_phasing.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`.
-- **Unphased VCFs produce empty phase-block tables.** A VCF without any `|` genotypes or `PS` fields will report `phased_fraction = 0` and an empty `phase_blocks.csv` — but the run does NOT fail. Always check the summary before drawing conclusions.
-- **`PS` is required for block grouping — without it you get ZERO blocks.** When `PS` is absent, `genomics_phasing.py` falls back to `str(pos)` so every variant becomes a singleton phase-set; then `compute_phasing_stats` filters out blocks with `< 2` variants, producing zero phase blocks and `phase_block_n50_bp = 0`. WhatsHap output always includes `PS`; some other phasers do not — verify before interpreting an "unphased" report.
-- **Multi-sample VCFs are NOT supported.** Only the first sample column is parsed; multi-sample phasing comparison is out of scope.
-- **Demo VCF synthesises ~80% phased het variants in 5–20 blocks.** Useful for smoke tests; not biologically meaningful.
-
-## Key CLI
+## CLI
 
 ```bash
-# Demo (2000 synthetic phased variants)
-python skills/genomics/genomics-phasing/genomics_phasing.py --demo --output /tmp/phase_demo
-
-# Real WhatsHap-phased VCF
-python skills/genomics/genomics-phasing/genomics_phasing.py \
-  --input sample.whatshap.vcf --output results/
+python skills/genomics/genomics-phasing/genomics_phasing.py --input input_file --output results/
+python skills/genomics/genomics-phasing/genomics_phasing.py --demo --output /tmp/genomics_phasing_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — PS-field semantics, phase-block N50 definition
-- `references/output_contract.md` — `tables/phased_variants.csv` + `phase_blocks.csv`
-- Adjacent skills: `genomics-variant-calling` (upstream — produces VCF that gets phased), `genomics-vcf-operations` (parallel — VCF stats / filtering on the same input), `genomics-variant-annotation` (downstream — annotate phased variants with gene context)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

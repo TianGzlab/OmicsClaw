@@ -1,0 +1,16 @@
+# %% [markdown]
+# A hand-worked synthetic fixture checks variant-annotation summary values.
+# %%
+from pathlib import Path
+import skills._sdk
+from skills._sdk.notebook import load_skill, read_input, write_output
+
+library = load_skill("genomics-variant-annotation")
+data_dir = Path(skills._sdk.__file__).resolve().parents[1] / "genomics/genomics-variant-annotation/data"
+source = next(data_dir.glob("example.*"))
+data = read_input(str(source), reader=library.read_records)
+result = library.analyze(data)
+summary = library.run_info(result)["summary"]
+assert summary["n_high_impact"] == 1
+write_output(result, "tables/variant_annotation.csv")
+write_output(library.distribution_figure(result), "figures/variant_annotation.png")

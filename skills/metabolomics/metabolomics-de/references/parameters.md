@@ -1,13 +1,6 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+Run `python skills/metabolomics/metabolomics-de/met_diff.py --help` for CLI flags.
+The generated API section in [SKILL.md](../SKILL.md) defines function defaults.
 
-- `--group-a-prefix`
-- `--group-b-prefix`
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+Welch tests use raw supplied intensities, with BH FDR and a fixed CLI significance threshold of 0.05. PCA uses untransformed intensities and converts NaNs to zero.

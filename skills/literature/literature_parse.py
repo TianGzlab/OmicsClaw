@@ -15,8 +15,9 @@ _SDK_ANCHOR = next(
 if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
-from skills.literature.core.parser import parse_input
-from skills.literature.core.extractor import DOMAIN_ENTRY, extract_metadata, infer_domain
+from skills._sdk.notebook import load_skill
+from skills.literature._lib.input_kind import detect_input_type
+from skills.literature._lib.extractor import DOMAIN_ENTRY, infer_domain
 from skills.literature.core.downloader import download_geo_dataset
 
 SKILL_NAME = "literature"
@@ -64,7 +65,14 @@ def main():
     print(f"Parsing input: {input_value}")
 
     # Parse input
-    text, detected_type = parse_input(input_value, input_type)
+    library = load_skill(SKILL_NAME)
+    detected_type = detect_input_type(input_value) if input_type == 'auto' else input_type
+    if detected_type == 'file':
+        text = library.read_document(input_value)
+    elif detected_type in ('url', 'doi', 'pubmed'):
+        text = library.fetch_text(input_value, input_type=detected_type)
+    else:
+        text = input_value
     print(f"Detected input type: {detected_type}")
 
     if not text or text.startswith('Error'):
@@ -73,7 +81,8 @@ def main():
 
     # Extract metadata
     print("Extracting metadata...")
-    metadata = extract_metadata(text)
+    accessions = library.extract(text)
+    metadata = library.run_info(accessions, keep=False)
 
     geo_acc = metadata['geo_accessions']
     gse_ids = geo_acc.get('gse', [])

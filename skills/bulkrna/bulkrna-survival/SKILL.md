@@ -1,8 +1,6 @@
 ---
 name: bulkrna-survival
-description: Load when stratifying patients by gene expression and testing for survival differences (Kaplan-Meier
-  + Cox) in bulk RNA-seq. Skip when no time-to-event clinical data exists; non-bulk cohorts (single-cell
-  / spatial survival is not supported).
+description: Load when comparing bulk expression strata against clinical time-to-event data with Kaplan-Meier and log-rank tests. R survival also fits Cox HR; Python reports a descriptive events/person-time ratio. Skip missing clinical outcomes.
 trigger: survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall survival, clinical outcome
 tags:
 - bulkrna
@@ -17,68 +15,109 @@ tags:
 
 ## When to use
 
-Run on a bulk RNA-seq cohort with paired clinical survival data
-(time-to-event + censoring) when you want to ask "does high vs low
-expression of gene X predict survival?".  Default workflow: per-gene
-median-cutoff stratification, log-rank p-value, Kaplan-Meier curve, and
-Cox proportional-hazards hazard ratio.
+Load when comparing bulk expression strata against clinical time-to-event data with Kaplan-Meier and log-rank tests. R survival also fits Cox HR; Python reports a descriptive events/person-time ratio. Skip missing clinical outcomes.
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill("bulkrna-survival")
+result = library.analyze(data, clinical=clinical, backend="python")
+write_output(result, "tables/result.csv")
+write_output(library.curve_figure(result, gene="G"), "figures/result.png")
+```
 
-- File types: `.csv`
+Read expression and metadata with `read_input` before calling the library.
+`examples/example_step.py` constructs a small synthetic dataset and checks
+its results through the step runner and fresh-kernel replay.
 
-**Outputs**
+## API
 
-- `tables/clinical.csv`
-- `tables/expr.csv`
-- `tables/km_data.csv`
-- `tables/survival_results.csv`
-- `figures/forest_plot.png`
-- `report.md`
-- `result.json`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-## Flow
+### `analyze(data: pd.DataFrame, *, clinical: pd.DataFrame, genes: list[str] | None=None, cutoff_method: str='median', backend: str='auto') -> pd.DataFrame`
 
-1. Load expression matrix + clinical data; align by sample ID.
-2. For each gene in `--genes` (or all):
-   - Skip with warning at `bulkrna_survival.py` if gene not in expression matrix.
-   - Stratify samples by `--cutoff-method` (default `median`; alt `optimal` finds the maxstat cut).
-   - Run log-rank test on the stratified groups.
-   - Compute a simple events/time hazard ratio.  Warn ("Heavy censoring (X%). KM tail estimates may be unreliable.") when the censoring rate exceeds 80%.
-3. Try R `survival` package first; fall back to Python `lifelines` (warns "R survival not available (...); using Python fallback.").
-4. Render KM curves + forest plot; emit `tables/survival_results.csv`.
+Return gene-wise survival comparisons without modifying expression.
+
+:param data: Nonnegative feature-by-sample expression.
+:param clinical: Clinical table with unique sample, nonnegative time and binary event columns.
+:param genes: Genes to test; None uses every row. Missing genes raise.
+:param cutoff_method: CLI default median; optimal scans cuts with unadjusted p-values.
+:param backend: auto prefers R survival with Cox HR, as the CLI did; python uses an events/person-time ratio.
+:returns: Per-gene table with diagnostics and KM points attached in attrs.
+:raises ValueError: Identifiers, clinical values, requested genes or comparison groups are invalid.
+:raises ImportError: Explicit R backend lacks survival or Matrix.
+:raises RuntimeError: The requested R method fails or returns incomplete results.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return actual backend, HR estimator and summary.
+
+:param data: Result from analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Diagnostics dictionary.
+:raises ValueError: The table has no analysis diagnostics.
+
+### `km_table(data: pd.DataFrame) -> pd.DataFrame`
+
+Return the fitted Kaplan-Meier points for both expression strata.
+
+:param data: Result from analyze.
+:returns: New table with gene, group, time and survival columns.
+:raises ValueError: The result lacks stored curves.
+
+### `curve_figure(data: pd.DataFrame, *, gene: str)`
+
+Plot the stored Kaplan-Meier curves for one analyzed gene.
+
+:param data: Result from analyze.
+:param gene: Exact gene identifier in the result.
+:returns: Matplotlib Figure.
+:raises ValueError: No curve exists for the requested gene.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+The function library returns DataFrames and Figures. The CLI loads the
+same library and owns reports and file writes. R runs in a temporary
+directory using Matrix Market, feature/sample identifiers and metadata.
+No R intermediate is a permanent CLI output.
 
 ## Gotchas
 
-- **Genes not in the expression matrix are silently skipped.**  `bulkrna_survival.py` logs a warning per missing gene and continues.  After the run, count the rows in `tables/survival_results.csv` (or inspect `result.json["results"]`) and compare against the `--genes` list — a typo'd or wrong-namespace gene produces no obvious error.
-- **`--cutoff-method optimal` p-values are NOT corrected for multiple testing.**  The `optimal` cutoff scans all possible cuts and picks the maximally separating one, which inflates Type I error.  Reported log-rank p-values are raw — apply Bonferroni / BH correction externally if you scan many genes.
-- **The hazard ratio is a simple events/person-time ratio, not a Cox MLE.**  The script computes `(events_high / time_high) / (events_low / time_low)` (`bulkrna_survival.py`), not a Cox proportional-hazards regression coefficient.  This estimator is biased when proportional-hazards holds with unequal exposure — for publication-grade HRs, re-fit a proper Cox model in R or `lifelines` against the same stratification.
-- **R-vs-Python backend silently switches.**  `main` warns and falls back to a NumPy log-rank implementation when R `survival` isn't importable; the per-gene HR estimator is the same simple events/time ratio in both cases, but the chosen backend isn't recorded in the summary dict — only in the warning log.  Verify R availability before relying on the result for downstream papers.
-- **Heavy censoring distorts KM tail estimates.**  `analyze_gene` warns when ≥80% of patients are censored; the printed median survival numbers are dominated by extrapolation past the last event time.  Treat `median_survival_*` as "≥ X" rather than a point estimate when the corresponding gene's censoring rate is high.
+- `analyze(backend="auto")` prefers R survival, which fits Cox PH hazard ratios. Its Python fallback uses a descriptive events/person-time ratio. `run_info()["hazard_estimator"]` distinguishes them.
+- `analyze` raises for missing genes or insufficient high/low groups; it does not silently deliver a subset of the requested genes.
+- `analyze(cutoff_method="optimal")` scans cutoffs and reports unadjusted p-values. Treat the selected-cutoff test as exploratory.
+- `km_table` exposes both KM curves. Median survival is None when a curve never reaches 0.5; no extrapolated median is invented.
+- `run_info()["dropped_expression_samples"]` reports samples excluded by the expression/clinical intersection. Clinical IDs must be unique.
 
-## Key CLI
+## Inputs and outputs
+
+Feature-by-sample expression CSV and a clinical CSV containing unique sample, nonnegative time and binary event.
+
+CLI outputs:
+
+- `tables/survival_results.csv`
+- `figures/km_<gene>.png` per successful gene
+- `figures/forest_plot.png` when at least two genes succeed
+- `report.md`, `result.json`
+- `reproducibility/commands.sh`
+
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-survival/bulkrna_survival.py --demo --output /tmp/bulkrna-survival_demo
-python skills/bulkrna/bulkrna-survival/bulkrna_survival.py \
-  --input expression.csv --clinical clinical.csv \
-  --genes TP53,BRCA1,EGFR --output results/
-python skills/bulkrna/bulkrna-survival/bulkrna_survival.py \
-  --input expression.csv --clinical clinical.csv \
-  --genes TP53 --cutoff-method optimal --output results/
+python skills/bulkrna/bulkrna-survival/bulkrna_survival.py --demo --output /tmp/bulkrna_survival_demo
 ```
+
+Run the script with `--help` for real-input arguments.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — KM + log-rank + Cox theory, R vs Python backend differences, optimal-cutoff caveats
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-de` (parallel: differential expression — survival adds the time-to-event dimension), `bulkrna-coexpression` (parallel: module-level survival via eigengene if traits include time-to-event)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`matplotlib`, `numpy`, `pandas`, `scipy`
+`matplotlib`, `numpy`, `pandas`, `scipy`, `survival`, `Matrix`

@@ -1,25 +1,11 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-└── tables/
-    └── qc_metrics.csv
-```
+- tables/qc_metrics.csv
+- report.md
+- result.json
+- `demo_proteomics.csv` is written only with `--demo`.
 
-## File contents
+- `reproducibility/commands.sh` records the CLI invocation template.
 
-- `tables/qc_metrics.csv` — written by `proteomics_ms_qc.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `proteomics_ms_qc.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-### Demo-only outputs
-
-- `demo_proteomics.csv` — generated only on `--demo`.
-
-## Notes
-
-Auto-generated from `proteomics_ms_qc.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The CLI owns these files; the library returns DataFrames. Plotting functions return
+Figures to the caller and do not add files to a CLI run.

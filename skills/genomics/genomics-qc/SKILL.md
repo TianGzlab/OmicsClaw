@@ -17,22 +17,87 @@ tags:
 
 ## When to use
 
-The user has a raw FASTQ file (`.fastq` or `.fastq.gz`) and wants
-standard pre-alignment QC: total reads, mean Phred quality, Q20 /
-Q30 rates, GC / N content, mean read length, adapter contamination
-percentage, per-base quality profile. This skill mirrors a subset
-of FastQC / fastp metrics in pure Python.
+Load this skill for the file-based analysis named in the description.
+The function library and CLI share the same calculations; no external
+aligner, assembler, caller or annotation service is started.
 
-It does NOT trim adapters or filter reads — it only measures.
-For BAM-level alignment QC use `genomics-alignment`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("genomics-qc")
+data = read_input("input.fastq", reader=library.read_records)
+result = library.analyze(data)
+write_output(result, "tables/result.csv")
+write_output(library.distribution_figure(result), "figures/distribution.png")
+```
 
-**Inputs**
+Run `examples/example_step.py` through the step runner for a small,
+hand-worked synthetic fixture. It asserts known summary values.
+The reader materializes the input in memory; use bounded FASTQ reads or
+pre-filter large genomic files before loading them.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_records(path: str | Path, *, max_reads: int=500000) -> pd.DataFrame`
+
+Read records through read_input(path, reader=library.read_records).
+
+:param path: Input file in the format documented under Inputs and outputs.
+:param max_reads: CLI default 500000 limits records materialized in memory.
+:returns: Parsed records as a DataFrame.
+:raises ValueError: Input values or file structure cannot be parsed.
+
+### `analyze(data: pd.DataFrame, *, max_reads: int=500000) -> pd.DataFrame`
+
+Compute qc summaries and return a new table, leaving data unchanged.
+
+:param data: Records containing sequence, quality.
+:param max_reads: CLI default 500000 limits the analyzed reads.
+:returns: Result table with diagnostics and summary in attrs['run_info'].
+:raises ValueError: Required columns are absent or records are empty or invalid.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return analysis diagnostics and summary.
+
+:param data: Result returned by analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: analyze has not populated diagnostics.
+
+### `distribution_figure(data: pd.DataFrame)`
+
+Plot mean_quality values without writing files.
+
+:param data: Result table containing mean_quality.
+:returns: Matplotlib Figure.
+:raises ValueError: The value column is absent or table is empty.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`analyze` returns a new DataFrame and leaves the input unchanged.
+`run_info(result)` returns the summary and method diagnostics.
+The CLI passes `keep=False` so diagnostics do not enter output tables.
+All calculations are deterministic; synthetic CLI demos retain seed 42.
+
+## Gotchas
+
+- `read_records` assumes Phred+33, accepts plain/gzip FASTQ, and rejects incomplete records or mismatched sequence/quality lengths.
+- `analyze` measures the first max_reads records (default 500000), tracks at most 300 quality positions and the 20 most frequent read lengths.
+- `run_info()["summary"]["adapter_contamination_pct"]` scans the last 20 bases for the first eight bases of two built-in adapter motifs. No trimming occurs.
+
+## Inputs and outputs
+
+Input files:
 
 - File types: `.fastq`, `.fq`
 
-**Outputs**
+CLI output files:
 
 - `tables/per_base_quality.csv`
 - `tables/qc_metrics.csv`
@@ -40,43 +105,23 @@ For BAM-level alignment QC use `genomics-alignment`.
 - `report.md`
 - `result.json`
 
-## Flow
+The library writes no files. Steps use `write_output`; the CLI owns the
+listed artifacts. Public figure functions return matplotlib Figures and
+do not add new CLI outputs.
 
-1. Load FASTQ (`--input <reads.fastq[.gz]>`) or synthesise demo reads at `output_dir/demo_reads.fastq` (`genomics_qc.py`).
-2. Stream up to `--max-reads` records (default 500_000); aggregate Phred / GC / N / length stats.
-3. Detect adapter contamination via fixed adapter motif scan.
-4. Write `tables/qc_metrics.csv` (`genomics_qc.py`) + `tables/per_base_quality.csv` + `report.md` + `result.json`.
-
-## Gotchas
-
-- **`--max-reads` defaults to 500 000** (`genomics_qc.py`). For very deep libraries this is a hard cap — increase it for full-flowcell QC. Reads beyond the cap are silently ignored.
-- **Empty FASTQ raises `ValueError("No reads found in {fastq_path}")`** at `genomics_qc.py`. A truncated upload manifests as exit-1; check the file size first.
-- **`--input` REQUIRED unless `--demo`.** `genomics_qc.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`.
-- **No trimming or filtering happens here.** This is a pure measurement skill — to actually trim adapters or quality-filter, run fastp / Trimmomatic outside OmicsClaw before re-running this for post-trim QC.
-- **Phred encoding is assumed Phred+33.** Old Solexa / Illumina 1.3+ Phred+64 files would mis-score; the script does NOT auto-detect encoding.
-- **Demo writes a synthetic FASTQ into `output_dir`.** `genomics_qc.py` writes `demo_reads.fastq` directly into the user-supplied output directory — re-running `--demo` overwrites silently.
-
-## Key CLI
+## CLI
 
 ```bash
-# Demo (synthetic FASTQ)
-python skills/genomics/genomics-qc/genomics_qc.py --demo --output /tmp/qc_demo
-
-# Real FASTQ
-python skills/genomics/genomics-qc/genomics_qc.py \
-  --input reads.fastq.gz --output results/ \
-  --max-reads 1000000
+python skills/genomics/genomics-qc/genomics_qc.py --input input_file --output results/
+python skills/genomics/genomics-qc/genomics_qc.py --demo --output /tmp/genomics_qc_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — Phred / Q20 / Q30 definitions, adapter motifs
-- `references/output_contract.md` — `tables/qc_metrics.csv` + per-base schema
-- Adjacent skills: `genomics-alignment` (downstream — alignment QC after mapping), `bulkrna-read-qc` (parallel — RNA-seq-flavoured FASTQ QC), `sc-qc` (parallel — single-cell QC after mapping)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

@@ -15,67 +15,65 @@ tags:
 - pathway
 ---
 
-# bulkrna-enrichment
+# Bulk pathway enrichment
 
-## When to use
+## Purpose
 
-Run after `bulkrna-de` to ask "which biological pathways are enriched
-in the DEG list?".  Two modes: ORA (over-representation analysis on a
-significance-filtered gene list) and pre-ranked GSEA (full ranked
-list, no threshold needed).  Backed by GSEApy with R clusterProfiler
-and a built-in hypergeometric implementation as fallbacks.
+Test differential-expression results against explicit pathway gene sets. ORA uses the union of those sets as its background; GSEA ranks all input genes. Gene identifiers must use the same namespace. R adapters are not implemented.
 
 ## Inputs & Outputs
 
-**Inputs**
+CLI input is a CSV with `gene`, `log2FoldChange`, `pvalue`, `padj`; `--gene-set-file` is a JSON mapping from pathway names to gene lists. The library accepts the table and mapping directly. CLI writes `tables/enrichment_results.csv`, `tables/enrichment_significant.csv`, report/result files and method-dependent figures.
 
-- File types: `.csv`
-- Accepts artifact `bulkrna.differential_results` (`csv`)
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/enrichment_results.csv`
-- `tables/enrichment_significant.csv`
-- `figures/enrichment_barplot.png`
-- `figures/enrichment_dotplot.png`
-- `report.md`
-- `result.json`
+### `enrich(de_results, *, gene_sets, method='ora', padj_cutoff=0.05, lfc_cutoff=1.0, random_state=42)`
 
-## Flow
+Test pathway enrichment without choosing a reference database.
 
-1. Load DE table; pick a ranking metric (log2FoldChange, signed -log10 padj, etc.).  Falls back to `log2FoldChange` with a warning at `bulkrna_enrichment.py` if the heuristic finds no preferred metric.
-2. Resolve `--method`: ORA, GSEA, or auto.  Hard-fails for unknown methods.
-3. Try R clusterProfiler first; on import failure, fall back to GSEApy.
-4. On GSEApy failure, fall back to the built-in hypergeometric implementation (`_run_hypergeometric_ora` ORA path, `_run_gsea_fallback` GSEA path).
-5. Render barplot + dotplot; emit enrichment table + report.
+:param de_results: DataFrame with gene, log2FoldChange, pvalue and padj.
+:param gene_sets: Nonempty mapping from pathway names to unique gene lists.
+:param method: CLI default ora; gsea runs GSEApy prerank.
+:param padj_cutoff: CLI significance threshold, default 0.05.
+:param lfc_cutoff: Strict absolute fold-change threshold, default 1.0.
+:param random_state: Local permutation seed, legacy default 42.
+:returns: Enrichment DataFrame with execution diagnostics in attrs.
+:raises ValueError: Missing reference, invalid values or unsupported method.
 
-## Gotchas
+### `run_info(result, *, keep=True)`
 
-- **Three-tier silent fallback chain.**  R clusterProfiler → GSEApy → built-in.  Each fall is `logger.warning`-only (`bulkrna_enrichment.py`); the chosen backend is in `result.json["method_used"]`.  Built-in is the least feature-rich (no permutation-based GSEA p-values) — verify which engine actually ran before claiming a particular method.
-- **Ranking-metric auto-pick is heuristic and not surfaced in `result.json`.**  `_resolve_ranking_metric` warns when it falls back to `log2FoldChange`, but if your DE table uses a non-standard column name (e.g. `lfc` instead of `log2FoldChange`), the heuristic may pick the wrong column without complaint.  The chosen metric is logged at INFO but does NOT make it into the summary dict (which carries only `n_input_genes`, `n_significant`, `method_used`, `n_terms_tested`, `n_enriched_terms`, `enrichment_df`).  Grep the run's stderr for "Using gseapy for pre-ranked GSEA (metric: ...)" to confirm.
-- **`--padj-cutoff` and `--lfc-cutoff` only apply to ORA.**  Pre-ranked GSEA uses the full ranked list and ignores both flags — passing them on a GSEA run silently does nothing.  This is correct GSEA behaviour, but easy to mistake for a bug.
-- **No DEGs above thresholds → silent empty plots.**  `generate_figures` warns ("No enrichment results to plot" / "No terms with valid padj") and skips plotting; the run still exits 0 with empty figures and an empty `tables/enrichment_results.csv`.  Loosen thresholds or pre-filter the input if your DE list is sparse.
+Read tested terms, pathway universe and requested/executed methods.
+
+:param result: DataFrame returned by enrich.
+:param keep: Default True; False removes diagnostic attrs.
+:returns: Diagnostic dictionary; empty after removal.
+
+### `enrichment_figure(result)`
+
+Plot pathway adjusted significance without saving it.
+
+:param result: Enrichment DataFrame with term and padj columns.
+:returns: matplotlib Figure.
+:raises KeyError: Required columns are missing.
+
+<!-- api:end -->
 
 ## Key CLI
 
 ```bash
-python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py --demo --output /tmp/bulkrna-enrichment_demo
-python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py \
-  --input de_results.csv --output results/ --method ora
-python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py \
-  --input de_results.csv --output results/ --method gsea \
-  --gene-set-file hallmark.gmt
+python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py --demo --output /tmp/bulkrna-enrichment
+python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py --input de.csv --gene-set-file pathways.json --output results/enrichment --method ora
 ```
 
-## See also
+## Gotchas
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — ORA vs GSEA, three-tier engine fallback, ranking-metric selection
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-de` (upstream — DE table input), `bulkrna-ppi-network` (parallel: same DEG list → STRING network), `sc-enrichment` / `spatial-enrichment` (single-cell / spatial siblings), `metabolomics-pathway-enrichment` (metabolite-side sibling)
+- `run_info(result)['background_genes']` is the pathway-union background, not all measured genes. Choose reference sets accordingly.
+- `run_info(result)['executed_method']` and `fallback_reason` disclose fallback calculations. The built-in GSEA fallback is a mean-rank permutation test, not GSEA; fallback emits a warning.
+- `tables/enrichment_results.csv` may be empty when no terms overlap. Demo pathways are available only with `--demo`; real input requires an explicit reference.
+- `run_info(result)['method_used']` distinguishes GSEApy and built-in calculations. The legacy `ora_r` and `gsea_r` flags now reject an unimplemented backend rather than silently changing it.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`gseapy`, `matplotlib`, `numpy`, `pandas`, `scipy`
+`numpy`, `pandas`, `scipy`, `matplotlib`, `gseapy`

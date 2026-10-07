@@ -52,155 +52,6 @@ CROSSLINKER_CONSTRAINTS = {
 }
 
 
-def generate_demo_data(output_dir: Path) -> Path:
-    """Generate synthetic cross-link MS data with realistic properties.
-
-    Simulates a typical XL-MS experiment:
-    - Mix of inter and intra-protein crosslinks
-    - Distance distribution centered around ~15-25Å (typical for DSS/BS3)
-    - Score and FDR distributions
-    """
-    rng = np.random.default_rng(42)
-    n_xlinks = 200
-    proteins = [f"P{i:04d}" for i in range(20)]
-
-    records = []
-    for i in range(n_xlinks):
-        prot_a = rng.choice(proteins)
-        # ~30% inter-protein, ~70% intra-protein (typical ratio)
-        if rng.random() < 0.7:
-            prot_b = prot_a
-        else:
-            prot_b = rng.choice([p for p in proteins if p != prot_a])
-
-        res_a = int(rng.integers(1, 500))
-        res_b = int(rng.integers(1, 500))
-
-        # Distances: mostly within crosslinker range, some violations
-        if rng.random() < 0.85:
-            # Within range (realistic crosslinks)
-            distance = float(rng.normal(20, 5))
-            distance = max(5.0, min(distance, 35.0))
-        else:
-            # Distance violations (potential false positives)
-            distance = float(rng.uniform(30, 50))
-
-        score = float(rng.exponential(15) + 5)
-        fdr = float(rng.beta(0.5, 5))  # Skewed toward low FDR
-
-        records.append({
-            "protein_a": prot_a,
-            "residue_a": res_a,
-            "aa_a": rng.choice(["K", "K", "K", "S", "T", "Y"]),  # Mostly Lys
-            "protein_b": prot_b,
-            "residue_b": res_b,
-            "aa_b": rng.choice(["K", "K", "K", "S", "T", "Y"]),
-            "distance_angstrom": round(distance, 2),
-            "score": round(score, 3),
-            "fdr": round(fdr, 4),
-            "crosslinker": "DSS",
-        })
-
-    df = pd.DataFrame(records)
-    path = output_dir / "demo_crosslinks.csv"
-    df.to_csv(path, index=False)
-    logger.info(f"Generated demo XL-MS data ({n_xlinks} crosslinks): {path}")
-    return path
-
-
-def analyse_crosslinks(data_path: Path, fdr_threshold: float = 0.05,
-                       crosslinker: str = "DSS") -> tuple[pd.DataFrame, dict]:
-    """Comprehensive cross-link analysis.
-
-    Performs:
-    1. FDR filtering
-    2. Inter/intra-protein classification
-    3. Distance constraint validation
-    4. Quality statistics
-
-    Reference: Rappsilber (2011) J Struct Biol 173(3):530-540.
-    """
-    df = pd.read_csv(data_path)
-    n_raw = len(df)
-    logger.info(f"Loaded {n_raw} crosslinks from {data_path.name}")
-
-    # FDR filtering
-    if "fdr" in df.columns:
-        df_filtered = df[df["fdr"] <= fdr_threshold].copy()
-        n_passed_fdr = len(df_filtered)
-        logger.info(f"FDR filtering (≤{fdr_threshold}): {n_raw} → {n_passed_fdr}")
-    else:
-        df_filtered = df.copy()
-        n_passed_fdr = n_raw
-
-    # Inter/intra classification
-    has_proteins = {"protein_a", "protein_b"}.issubset(df_filtered.columns)
-    if has_proteins:
-        df_filtered["link_type"] = np.where(
-            df_filtered["protein_a"] == df_filtered["protein_b"],
-            "intra-protein",
-            "inter-protein",
-        )
-        n_inter = int((df_filtered["link_type"] == "inter-protein").sum())
-        n_intra = int((df_filtered["link_type"] == "intra-protein").sum())
-    else:
-        n_inter = 0
-        n_intra = len(df_filtered)
-
-    # Distance constraint validation
-    max_distance = CROSSLINKER_CONSTRAINTS.get(crosslinker.upper(), 30.0)
-
-    if "distance_angstrom" in df_filtered.columns:
-        distances = df_filtered["distance_angstrom"]
-        n_satisfied = int((distances <= max_distance).sum())
-        n_violated = int((distances > max_distance).sum())
-        satisfaction_rate = round(n_satisfied / len(df_filtered) * 100, 1) if len(df_filtered) > 0 else 0
-
-        df_filtered["constraint_satisfied"] = distances <= max_distance
-
-        dist_stats = {
-            "mean_distance": round(float(distances.mean()), 2),
-            "median_distance": round(float(distances.median()), 2),
-            "min_distance": round(float(distances.min()), 2),
-            "max_distance_observed": round(float(distances.max()), 2),
-        }
-    else:
-        n_satisfied = n_passed_fdr
-        n_violated = 0
-        satisfaction_rate = 100.0
-        dist_stats = {}
-
-    # Unique protein pairs
-    if has_proteins:
-        inter_df = df_filtered[df_filtered["link_type"] == "inter-protein"]
-        pairs = set()
-        for _, row in inter_df.iterrows():
-            pair = tuple(sorted([row["protein_a"], row["protein_b"]]))
-            pairs.add(pair)
-        n_unique_pairs = len(pairs)
-        n_unique_proteins = len(set(df_filtered["protein_a"]) | set(df_filtered["protein_b"]))
-    else:
-        n_unique_pairs = 0
-        n_unique_proteins = 0
-
-    stats = {
-        "n_raw_crosslinks": n_raw,
-        "n_after_fdr": n_passed_fdr,
-        "n_inter_protein": n_inter,
-        "n_intra_protein": n_intra,
-        "n_unique_protein_pairs": n_unique_pairs,
-        "n_unique_proteins": n_unique_proteins,
-        "crosslinker": crosslinker,
-        "max_distance_constraint": max_distance,
-        "n_constraint_satisfied": n_satisfied,
-        "n_constraint_violated": n_violated,
-        "constraint_satisfaction_rate": satisfaction_rate,
-        **dist_stats,
-    }
-
-    return df_filtered, stats
-
-
 def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
     """Write structural proteomics report."""
     header = generate_report_header(
@@ -251,6 +102,8 @@ def write_report(output_dir: Path, stats: dict, input_file: str | None) -> None:
 
 
 def main():
+    from skills._sdk.notebook import load_skill
+    library = load_skill("proteomics-structural")
     parser = argparse.ArgumentParser(description="Structural Proteomics / XL-MS Analysis")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -266,7 +119,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.demo:
-        data_path = generate_demo_data(output_dir)
+        data_path = output_dir / "demo_crosslinks.csv"
+        library.demo_data().to_csv(data_path, index=False)
         input_file = None
     else:
         if not args.input_path:
@@ -274,11 +128,14 @@ def main():
         data_path = Path(args.input_path)
         input_file = args.input_path
 
-    result_df, stats = analyse_crosslinks(
-        data_path,
+    result_df = library.analyse_crosslinks(
+        pd.read_csv(data_path),
         fdr_threshold=args.fdr,
         crosslinker=args.crosslinker,
     )
+
+    diagnostics = library.run_info(result_df, keep=False)
+    stats = diagnostics.pop("summary")
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
@@ -290,7 +147,7 @@ def main():
         inter.to_csv(tables_dir / "inter_protein_crosslinks.csv", index=False)
 
     write_report(output_dir, stats, input_file)
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, stats, {})
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, stats, {"diagnostics": diagnostics})
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

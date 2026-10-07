@@ -18,64 +18,103 @@ tags:
 
 ## When to use
 
-The user has a protein-quantification CSV (typically the output of
-`proteomics-data-import`, with rows = proteins and columns =
-samples + metadata) and wants QC summary statistics: protein count,
-sample count, fraction of missing intensities, per-protein
-coefficient of variation (CV) — median and mean. Auto-detects
-intensity columns by `select_dtypes(include=[np.number])`.
+Numeric columns excluding metadata-like names are samples; if none remain, all numeric columns are used. Zero and NaN count as missing.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-This skill does NOT process raw spectra. For peptide / PSM-level
-identification stats use `proteomics-identification`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-ms-qc')
+data = library.demo_data(random_state=42)
+result = library.quality_control(data)
+write_output(result, 'tables/qc_metrics.csv')
+```
 
-**Inputs**
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-- Modalities: ms
-- File types: `.csv`
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/qc_metrics.csv`
-- `report.md`
-- `result.json`
+### `quality_control(data: pd.DataFrame) -> pd.DataFrame`
 
-## Flow
+Return a one-row QC table without changing input intensities.
 
-1. Load CSV (`--input <file.csv>`) or generate a demo at `output_dir/demo_proteomics.csv` (`proteomics_ms_qc.py`).
-2. Detect numeric (intensity) columns via `select_dtypes(include=[np.number])` (`proteomics_ms_qc.py`); raise `ValueError("No intensity/sample columns detected in input data")` if none found.
-3. Compute n_proteins / n_samples / missing_rate / per-protein CV.
-4. Write `tables/qc_metrics.csv` (`proteomics_ms_qc.py`) + `report.md` + `result.json`.
+:param data: Protein rows and numeric intensity columns; metadata-like names are excluded when possible.
+:returns: Scalar QC metrics; per-sample completeness and selected columns are in run_info.
+:raises ValueError: There are no proteins or numeric intensity columns.
+
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read QC diagnostics.
+
+:param table: Output of quality_control.
+:param keep: True preserves attrs; False removes diagnostics.
+:returns: A separate dictionary with selected sample columns and completeness.
+:raises TypeError: The input is not a DataFrame.
+
+### `completeness_figure(table: pd.DataFrame)`
+
+Plot detected protein percentages per sample.
+
+:param table: QC table retaining run_info attributes.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: QC diagnostics are absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate a synthetic protein intensity table.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: One hundred proteins and five sample columns.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Numeric columns excluding metadata-like names are samples; if none remain, all numeric columns are used. Zero and NaN count as missing.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **Sample columns must be NUMERIC.** Intensity-column auto-detection (`proteomics_ms_qc.py`) uses `select_dtypes(include=[np.number])`. String-typed intensities (e.g. quoted numbers in some Spectronaut exports) are silently treated as metadata, not samples — your `n_samples` will be 0 and the run raises `ValueError`.
-- **No intensity columns ⇒ hard fail.** `proteomics_ms_qc.py` raises `ValueError("No intensity/sample columns detected in input data")` — there is no auto-detection of `intensity_*` prefixes; only dtype-based.
-- **`--input` REQUIRED unless `--demo`.** `proteomics_ms_qc.py` raises `ValueError("--input required when not using --demo")`.
-- **Both `NaN` and `0.0` count as missing.** `proteomics_ms_qc.py` computes `missing_mask = np.isnan(intensities) | (intensities == 0)` — zero is treated as "not detected" (the proteomics convention). If your search engine writes a small placeholder (e.g. `1.0`) for undetected proteins, the missing rate is artificially LOW; pre-impute placeholders to `0` or `NaN` first.
-- **CV is per-protein across samples.** Reported `median_cv` / `mean_cv` are aggregations across the per-protein CV distribution — interpret as "typical protein-level reproducibility", not "sample-level reproducibility".
+- quality_control reports per-protein CV across positive intensities. run_info retains the actual sample columns and per-sample completeness.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/qc_metrics.csv
+- report.md
+- result.json
+- `demo_proteomics.csv` is written only with `--demo`.
+
+- `reproducibility/commands.sh` records the CLI invocation template.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo
-python skills/proteomics/proteomics-ms-qc/proteomics_ms_qc.py --demo --output /tmp/qc_demo
-
-# Real protein table (e.g. output of proteomics-data-import)
-python skills/proteomics/proteomics-ms-qc/proteomics_ms_qc.py \
-  --input results/tables/proteins.csv --output qc_results/
+python skills/proteomics/proteomics-ms-qc/proteomics_ms_qc.py --demo --output /tmp/proteomics_ms_qc
 ```
+
+For real input replace `--demo` with `--input <table>`.
+
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — CV definition, missing-value handling
-- `references/output_contract.md` — `tables/qc_metrics.csv` schema
-- Adjacent skills: `proteomics-data-import` (upstream — produces the protein table), `proteomics-quantification` (downstream — LFQ / iBAQ / spectral count), `proteomics-identification` (parallel — peptide-level summary), `proteomics-de` (downstream — differential abundance)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

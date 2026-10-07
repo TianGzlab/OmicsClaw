@@ -1,15 +1,6 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+Run `python skills/metabolomics/metabolomics-peak-detection/peak_detect.py --help` for CLI flags.
+The generated API section in [SKILL.md](../SKILL.md) defines function defaults.
 
-- `--distance`
-- `--height`
-- `--prominence`
-- `--sample-prefix`
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+scipy.signal.find_peaks uses prominence, optional height and a row-index distance after sorting by rt. Widths are measured at half prominence in row-index units.

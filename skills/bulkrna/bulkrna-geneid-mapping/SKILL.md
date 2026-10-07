@@ -1,8 +1,6 @@
 ---
 name: bulkrna-geneid-mapping
-description: Load when converting gene identifiers between Ensembl, Entrez, and HGNC symbol in a bulk
-  RNA-seq count matrix. Skip when the input is already in the desired identifier system; organisms outside
-  human/mouse; non-bulk-counts inputs.
+description: Load when converting Ensembl, Entrez or symbol IDs in a bulk RNA count matrix using an explicit mapping or a small human demo reference. Skip when IDs already match downstream needs; use fetch_mapping explicitly for MyGene lookup.
 trigger: gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation, convert IDs
 tags:
 - bulkrna
@@ -18,65 +16,102 @@ tags:
 
 ## When to use
 
-Run between counting and downstream analysis when the gene identifiers
-in your count matrix don't match the namespace of your downstream tool
-(e.g. STARsolo gives Ensembl IDs but GSEA wants HGNC symbols).
-Currently supports Ensembl ↔ Entrez ↔ HGNC symbol for human and mouse
-via built-in tables, with optional mygene API enrichment.  UniProt is
-not supported — feed via `--mapping-file` if needed.
+Convert Ensembl, Entrez and symbol identifiers in count-matrix row indexes. Use a caller-provided mapping for full coverage or non-human organisms. Skip when identifiers already match downstream needs.
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+import pandas as pd
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill('bulkrna-geneid-mapping')
+data = read_input('counts.csv', reader=lambda path: pd.read_csv(path, index_col=0))
+result = library.map_ids(data)
+write_output(result, 'tables/result.csv')
+```
 
-- File types: `.csv`
+[examples/example_step.py](examples/example_step.py) runs offline and supports
+fresh-kernel replay. Pure computations return objects; CLI and steps own writes.
 
-**Outputs**
+## API
 
-- `tables/mapped_counts.csv`
-- `tables/mapping_table.csv`
-- `tables/unmapped_genes.csv`
-- `report.md`
-- `result.json`
-- Produces artifact `bulkrna.count_matrix` as `tables/mapped_counts.csv` (`csv`)
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-## Flow
+### `map_ids(data, *, from_type='ensembl', to_type='symbol', species='human', on_duplicate='sum', mapping=None)`
 
-1. Load count matrix.
-2. Strip Ensembl version suffixes (`bulkrna_geneid_mapping.py`: `ENSG00000141510.12 → ENSG00000141510`).
-3. Look up each ID in the built-in mapping table; fall back to the mygene API if available (`_try_mygene_mapping` warns and skips API path if `mygene` not importable).
-4. Resolve duplicate-target collisions per `--on-duplicate` (`sum` / `first` / `drop`).
-5. Write `tables/mapped_counts.csv`, `tables/mapping_table.csv`, `tables/unmapped_genes.csv`.
+Map count-matrix row identifiers without network or file access.
+
+:param data: Gene-by-sample counts; the row index contains source IDs.
+:param from_type: CLI default ensembl; entrez and symbol are also supported.
+:param to_type: CLI default symbol; target namespace.
+:param species: CLI default human; mouse requires an explicit reference.
+:param on_duplicate: CLI default sum; first or drop resolve target collisions differently.
+:param mapping: Optional source/target DataFrame; None uses ten human demo genes only.
+:returns: A new mapped DataFrame with reference scope, mapping records and summary diagnostics.
+:raises ValueError: Namespaces, duplicate policy or reference data are invalid.
+
+### `fetch_mapping(data, *, from_type='ensembl', to_type='symbol', species='human')`
+
+Query MyGene explicitly and return a local source/target mapping table.
+
+:param data: Iterable of identifiers to send to the public MyGene service.
+:param from_type: Default ensembl; source namespace.
+:param to_type: Default symbol; requested target namespace.
+:param species: Default human; MyGene species selector.
+:returns: A DataFrame containing only identifiers for which MyGene returned a match.
+:raises ImportError: Install mygene with install_skill_deps if unavailable.
+:raises Exception: Network or service errors propagate; no demo substitute is returned.
+
+### `mapping_table(data)`
+
+Return the original-to-target mapping decisions for every input row.
+
+:param data: Mapped count matrix returned by map_ids.
+:returns: A new DataFrame with original_id, stripped_id, mapped_id and was_mapped.
+:raises KeyError: The count matrix has no mapping diagnostics.
+
+### `run_info(data, *, keep=True)`
+
+Read mapping diagnostics without modifying the count values.
+
+:param data: Mapped counts returned by map_ids.
+:param keep: Default True; the CLI removes diagnostics with False.
+:returns: An independent diagnostic dictionary.
+:raises TypeError: data is not a DataFrame.
+
+### `mapping_figure(data)`
+
+Plot mapped and unmapped source-row counts.
+
+:param data: Count matrix returned by map_ids.
+:returns: A matplotlib Figure; no files are written.
+:raises KeyError: Mapping diagnostics are absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Local map_ids never queries the network. Its default reference contains ten human genes; it also supports reverse namespace mapping within that small reference. Pass a source/target DataFrame to override it. fetch_mapping explicitly sends identifiers to MyGene. The CLI queries MyGene only with --fetch-mygene.
 
 ## Gotchas
 
-- **mygene API is opt-in via package install, not a CLI flag.**  `bulkrna_geneid_mapping.py` falls back silently when `mygene` is not importable, leaving you with built-in-table coverage only.  The summary dict does not record whether the API was used; the only signal is the warning log line and the `pct_mapped` value (built-in tables cover ~20 well-known cancer-relevant genes — anything substantially higher implies the API ran).
-- **`--from`/`--to` only accept `ensembl`, `entrez`, `symbol`** (`bulkrna_geneid_mapping.py`).  UniProt and other namespaces are not in the choices list and will fail at argparse.  If you need UniProt, supply a custom `--mapping-file` TSV.
-- **Built-in tables cover human + mouse only** (`--species` choices).  Other organisms fail with empty mappings if `mygene` isn't installed; either install `mygene` or supply `--mapping-file`.
-- **Many-to-one collapses follow `--on-duplicate` (default `sum`).**  Default sums read counts across genes mapping to the same target symbol — meaningful for paralog families but wrong if you wanted per-isoform tracking.  Choose `first` to take the first hit, or `drop` to keep only unique mappings.  The number resolved is in `result.json["n_duplicates_resolved"]`.
-- **Ensembl version stripping is unconditional**.  If your downstream tool *requires* the version suffix (rare), this skill silently drops it.
+- `map_ids` strips Ensembl version suffixes, retains unmapped identifiers and resolves target collisions with sum, first or drop. Explicit mappings take priority. Non-human mapping without a reference raises an error. `run_info` identifies demo versus provided reference scope.
 
-## Key CLI
+## Inputs and outputs
+
+`tables/mapped_counts.csv`, `tables/mapping_table.csv`, `report.md`, `result.json` and `reproducibility/commands.sh`. `tables/unmapped_genes.csv` is conditional on unmapped input rows. The CLI does not write figures.
+
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --demo --output /tmp/bulkrna-geneid-mapping_demo
-python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py \
-  --input counts.csv --output results/ \
-  --from ensembl --to symbol --species human
-python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py \
-  --input counts.csv --output results/ \
-  --from ensembl --to symbol --on-duplicate first
+python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --demo --output /tmp/bulkrna_geneid_mapping
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — built-in tables, mygene fallback, version-suffix stripping
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-qc` (run before to inspect raw IDs), `bulkrna-de` (downstream — DE expects whatever ID system the rest of your pipeline uses), `bulkrna-enrichment` (downstream — enrichment requires HGNC symbols or Entrez IDs in most cases)
+- [Parameters](references/parameters.md)
+- [Methodology](references/methodology.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`mygene`, `numpy`, `pandas`
+`numpy`, `pandas`, `mygene`, `matplotlib`

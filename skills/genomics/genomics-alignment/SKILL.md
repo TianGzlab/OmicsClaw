@@ -19,65 +19,108 @@ tags:
 
 ## When to use
 
-The user has a text SAM file from any aligner (BWA-MEM, Bowtie2,
-Minimap2, etc.) and wants standard alignment QC: mapped-read count,
-mapping rate, MAPQ distribution, proper-pair rate, duplicate rate.
-This skill mirrors `samtools flagstat` + per-MAPQ binning entirely
-in pure Python (no `samtools` install needed). It does **not**
-perform alignment — feed in an already-aligned `.sam` (convert a BAM first).
+Load this skill for the file-based analysis named in the description.
+The function library and CLI share the same calculations; no external
+aligner, assembler, caller or annotation service is started.
 
-For pre-alignment FASTQ QC use `genomics-qc`. For variant calling
-on the aligned reads use `genomics-variant-calling`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("genomics-alignment")
+data = read_input("input.sam", reader=library.read_records)
+result = library.analyze(data)
+write_output(result, "tables/result.csv")
+write_output(library.distribution_figure(result), "figures/distribution.png")
+```
 
-**Inputs**
+Run `examples/example_step.py` through the step runner for a small,
+hand-worked synthetic fixture. It asserts known summary values.
+The reader materializes the input in memory; use bounded FASTQ reads or
+pre-filter large genomic files before loading them.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_records(path: str | Path) -> pd.DataFrame`
+
+Read records through read_input(path, reader=library.read_records).
+
+:param path: Input file in the format documented under Inputs and outputs.
+
+:returns: Parsed records as a DataFrame.
+:raises ValueError: Input values or file structure cannot be parsed.
+
+### `analyze(data: pd.DataFrame) -> pd.DataFrame`
+
+Compute alignment summaries and return a new table, leaving data unchanged.
+
+:param data: Records containing flag, mapq, tlen.
+
+:returns: Result table with diagnostics and summary in attrs['run_info'].
+:raises ValueError: Required columns are absent or records are empty or invalid.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return analysis diagnostics and summary.
+
+:param data: Result returned by analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: analyze has not populated diagnostics.
+
+### `distribution_figure(data: pd.DataFrame)`
+
+Plot mapping_rate_pct values without writing files.
+
+:param data: Result table containing mapping_rate_pct.
+:returns: Matplotlib Figure.
+:raises ValueError: The value column is absent or table is empty.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`analyze` returns a new DataFrame and leaves the input unchanged.
+`run_info(result)` returns the summary and method diagnostics.
+The CLI passes `keep=False` so diagnostics do not enter output tables.
+All calculations are deterministic; synthetic CLI demos retain seed 42.
+
+## Gotchas
+
+- `read_records` accepts text SAM, not binary BAM/CRAM; convert those upstream. No aligner or samtools is invoked.
+- `run_info()["summary"]` excludes secondary and supplementary alignments from primary-read metrics; insert sizes count both mates, matching the legacy CLI.
+
+## Inputs and outputs
+
+Input files:
 
 - File types: `.sam`
 
-**Outputs**
+CLI output files:
 
 - `tables/alignment_stats.csv`
 - `report.md`
 - `result.json`
 
-## Flow
+The library writes no files. Steps use `write_output`; the CLI owns the
+listed artifacts. Public figure functions return matplotlib Figures and
+do not add new CLI outputs.
 
-1. Open the SAM in text mode (`genomics_alignment.py` → `open(sam_path, "r")`) or synthesise a demo SAM at `output_dir/demo_alignment.sam`.
-2. Stream the records, count flags (mapped / proper-pair / dup / supplementary / secondary).
-3. Bin MAPQ; compute insert-size mean / median (paired only).
-4. Write `tables/alignment_stats.csv` (`genomics_alignment.py`) + `report.md` + standardised `result.json` envelope.
-
-## Gotchas
-
-- **`--input` REQUIRED unless `--demo`.** `genomics_alignment.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`. There is no `parser.error` shortcut — `ValueError` propagates as a Python traceback, exit code 1.
-- **Text SAM only — binary BAM raises `UnicodeDecodeError`.** `genomics_alignment.py` calls `open(sam_path, "r")` (text mode); there is no `pysam` import or BAM/CRAM decoder anywhere in the script. Convert BAMs upstream with `samtools view -h aligned.bam > aligned.sam`. The "no pysam dependency" comment documents this intent.
-- **No subprocess to `samtools`.** Parsing is pure-Python — the script never shells out. CRAM input is **not** supported either.
-- **No alignment is performed.** This skill only summarises an already-aligned file. To produce the SAM/BAM, run BWA / Bowtie2 / Minimap2 yourself first; this skill consumes their output.
-- **Demo writes a synthetic SAM into `output_dir`.** `genomics_alignment.py` writes `demo_alignment.sam` directly into the user-specified output directory. If you re-run `--demo` with different parameters in the same dir, the file is overwritten silently.
-- **Insert-size statistics are paired-only.** Single-end alignments still emit a row — but the insert-size columns will be 0 / NaN. Inspect `summary['proper_pair_rate']` to confirm the input is paired before drawing conclusions.
-
-## Key CLI
+## CLI
 
 ```bash
-# Demo (synthetic 1K-read SAM)
-python skills/genomics/genomics-alignment/genomics_alignment.py --demo --output /tmp/align_demo
-
-# Real data (convert BAM to text SAM first)
-samtools view -h sample.aligned.bam > sample.aligned.sam
-python skills/genomics/genomics-alignment/genomics_alignment.py \
-  --input sample.aligned.sam --output results/
+python skills/genomics/genomics-alignment/genomics_alignment.py --input input_file --output results/
+python skills/genomics/genomics-alignment/genomics_alignment.py --demo --output /tmp/genomics_alignment_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — flagstat field semantics, MAPQ interpretation
-- `references/output_contract.md` — `tables/alignment_stats.csv` schema
-- Adjacent skills: `genomics-qc` (upstream — FASTQ-level QC before alignment), `genomics-variant-calling` (downstream — variant discovery on the BAM), `genomics-cnv-calling` (downstream — depth-of-coverage CNV from the BAM)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

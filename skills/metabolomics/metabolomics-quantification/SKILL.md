@@ -17,76 +17,83 @@ tags:
 
 ## When to use
 
-The user has a feature × sample metabolomics intensity table and
-wants missing-value imputation followed by normalisation, in a
-single pass. Imputation: `min` (1/2 of column min), `median`
-(per-column median), `knn` (sklearn KNNImputer). Normalisation:
-`tic` (Total Ion Current per sample), `median` (per-sample
-median), `log` (log2(x+1)).
+Impute zeros/NaNs and normalize sample intensities while keeping feature metadata. Use metabolomics-normalization for normalization alone.
 
-Sample columns are auto-detected by name prefix `sample` /
-`intensity`. For just normalisation use `metabolomics-normalization`;
-for raw LC-MS use `metabolomics-xcms-preprocessing`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+import pandas as pd
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("metabolomics-quantification")
+data = read_input('features.csv', reader=pd.read_csv)
+result = library.quantify(data)
+write_output(result, 'tables/result.csv')
+```
 
-**Inputs**
+[examples/example_step.py](examples/example_step.py) runs a seeded synthetic
+example through the step runner and writes a table and Figure. Computations
+return new DataFrames, leave the input unchanged and expose diagnostics through
+`run_info(result)`. Plotting functions write no files.
 
-- File types: `.csv`
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/quantified_features.csv`
-- `report.md`
-- `result.json`
+### `quantify(data, *, impute='min', normalize='tic')`
 
-## Flow
+Return imputed and normalized intensities with metadata preserved.
 
-1. Load CSV (`--input <features.csv>`) or generate a demo (`--demo`).
-2. Auto-detect sample columns via `c.startswith("sample") or c.startswith("intensity")` (`met_quantify.py`); raise `ValueError("Could not auto-detect sample columns in the input file.")` if none found.
-3. Impute missing values per `--impute` (`min` / `median` / `knn`); reject unknown method with `ValueError("Unknown impute method: ...")`.
-4. Normalise per `--normalize` (`tic` / `median` / `log`); reject unknown method.
-5. Write `tables/quantified_features.csv` (`met_quantify.py`) + `report.md` + `result.json`.
+:param data: Feature table with sample/intensity columns; zeros and NaNs are missing.
+:param impute: CLI default min (half global positive minimum); median or knn also work.
+:param normalize: CLI default tic; median or log are alternatives.
+:returns: A new DataFrame with missing-value counts in attrs['run_info'].
+:raises ValueError: Samples are absent, have no positive observations or a method is unknown.
+:raises ImportError: KNN requires scikit-learn; use install_skill_deps.
+
+### `run_info(data, *, keep=True)`
+
+Read diagnostics attached to a returned table.
+
+:param data: DataFrame returned by this library.
+:param keep: Default True; use False in the CLI to remove diagnostics.
+:returns: An independent dictionary describing the run.
+:raises ValueError: The table carries no run_info.
+
+### `distribution_figure(data)`
+
+Plot sample intensities, excluding numeric feature metadata.
+
+:param data: The input or quantified feature table.
+:returns: A matplotlib Figure.
+:raises ValueError: No numeric sample columns are available.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Min imputation uses half the global positive minimum, median uses each column positive median, and KNN uses neighbouring feature rows with up to five neighbours. TIC scales column sums to their median; median scales column medians; log computes log2(x+1).
 
 ## Gotchas
 
-- **Sample-column auto-detection is case-SENSITIVE prefix match.** `met_quantify.py` uses `c.startswith("sample") or c.startswith("intensity")`. `Sample_1` (capital S) does NOT match — pre-rename to lowercase or use `metabolomics-peak-detection`'s `--sample-prefix` (no equivalent flag here).
-- **No sample columns ⇒ `ValueError`.** `met_quantify.py` raises `ValueError("Could not auto-detect sample columns in the input file.")` after both detection passes fail.
-- **`--input` REQUIRED unless `--demo`.** `met_quantify.py` raises `ValueError("--input required when not using --demo")`.
-- **`knn` imputation requires sklearn.** Available by default in OmicsClaw env. Imputes using `KNNImputer(n_neighbors=5)`.
-- **`log` normalisation is `log2(x+1)`.** Zero → 0 (preserves zeros); negative values raise (silently propagate NaN). Pre-clip negatives upstream.
-- **Imputation runs BEFORE normalisation.** This means `min` imputation uses unnormalised column min — re-running with a different `--normalize` does NOT change imputed-cell values. To get norm-aware imputation, run `metabolomics-normalization` standalone first, then use `--impute median` here on already-normalised data.
+- `quantify` detects sample/intensity prefixes, then numeric columns excluding feature_id, mz, rt, name and id. Every sample needs a positive observed intensity; completely missing samples raise ValueError for all methods.
 
-## Key CLI
+## Inputs and outputs
+
+CSV input; `tables/quantified_features.csv`, `report.md` and `result.json`. Demo mode also writes its synthetic input CSV at the output root.
+The function library returns objects; the CLI and step own file writes.
+
+## CLI
 
 ```bash
-# Demo
-python skills/metabolomics/metabolomics-quantification/met_quantify.py --demo --output /tmp/quant_demo
-
-# Real intensity table (default min impute + TIC normalize)
-python skills/metabolomics/metabolomics-quantification/met_quantify.py \
-  --input features.csv --output results/
-
-# KNN impute + median normalize
-python skills/metabolomics/metabolomics-quantification/met_quantify.py \
-  --input features.csv --output results/ \
-  --impute knn --normalize median
-
-# log2(x+1) only
-python skills/metabolomics/metabolomics-quantification/met_quantify.py \
-  --input features.csv --output results/ \
-  --impute median --normalize log
+python skills/metabolomics/metabolomics-quantification/met_quantify.py --demo --output /tmp/metabolomics_quantification
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — imputation / normalisation method semantics
-- `references/output_contract.md` — `tables/quantified_features.csv` schema
-- Adjacent skills: `metabolomics-xcms-preprocessing` (upstream), `metabolomics-peak-detection` (upstream), `metabolomics-normalization` (parallel — normalisation only), `metabolomics-statistics` (downstream — multi-group testing), `metabolomics-de` (downstream — two-group DE)
+- [Parameters](references/parameters.md)
+- [Methodology](references/methodology.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`, `scikit-learn`
+`numpy`, `pandas`, `scikit-learn`, `matplotlib`

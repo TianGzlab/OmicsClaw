@@ -34,6 +34,7 @@ from skills._sdk.report import (
     generate_report_footer,
 )
 from skills._sdk.result import write_result_json
+from skills.bulkrna._lib.batch_correction import _run_pca, _silhouette_score
 
 logger = logging.getLogger(__name__)
 
@@ -100,165 +101,24 @@ def get_demo_data() -> tuple[pd.DataFrame, pd.DataFrame, Path]:
 # R sva::ComBat integration (primary method)
 # ---------------------------------------------------------------------------
 
-def _run_combat_r(
-    expr_df: pd.DataFrame,
-    batch_df: pd.DataFrame,
-    parametric: bool = True,
-) -> pd.DataFrame:
-    """Run ComBat via R sva package.
 
-    Returns corrected expression DataFrame (same shape as input).
-    """
-    import tempfile
-    from skills._sdk.deps import validate_r_environment
-    from skills._sdk.r_script_runner import RScriptRunner
-    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
-
-    validate_r_environment(required_r_packages=["sva"])
-
-    scripts_dir = _SDK_R_SCRIPTS_DIR
-    runner = RScriptRunner(scripts_dir=scripts_dir)
-
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_combat_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        expr_df.to_csv(tmpdir / "counts.csv")
-        batch_df.to_csv(tmpdir / "batch_info.csv", index=False)
-
-        output_dir = tmpdir / "output"
-        output_dir.mkdir()
-
-        runner.run_script(
-            "bulkrna_combat.R",
-            args=[
-                str(tmpdir / "counts.csv"),
-                str(tmpdir / "batch_info.csv"),
-                str(output_dir),
-                str(parametric).upper(),
-            ],
-            expected_outputs=["corrected_counts.csv"],
-            output_dir=output_dir,
-        )
-
-        corrected = pd.read_csv(output_dir / "corrected_counts.csv", index_col=0)
-        return corrected
 
 
 # ---------------------------------------------------------------------------
 # ComBat implementation (Python fallback, parametric EB)
 # ---------------------------------------------------------------------------
 
-def _combat_correct(data: pd.DataFrame, batch_labels: pd.Series) -> pd.DataFrame:
-    """Parametric ComBat batch correction (Johnson et al., 2007).
 
-    Parameters
-    ----------
-    data : DataFrame
-        Genes-as-rows, samples-as-columns expression matrix.
-    batch_labels : Series
-        Batch label for each sample (index must match data.columns).
-
-    Returns
-    -------
-    Corrected DataFrame of same shape.
-    """
-    dat = data.values.astype(float).copy()
-    n_genes, n_samples = dat.shape
-    batches = batch_labels.values
-    unique_batches = np.unique(batches)
-    n_batch = len(unique_batches)
-
-    if n_batch < 2:
-        logger.warning("Only 1 batch detected; returning data unchanged.")
-        return data.copy()
-
-    # Batch indices
-    batch_idx = {b: np.where(batches == b)[0] for b in unique_batches}
-    n_per_batch = {b: len(idx) for b, idx in batch_idx.items()}
-
-    # Step 1: Standardize per gene
-    grand_mean = dat.mean(axis=1)
-    grand_var = dat.var(axis=1, ddof=1)
-    grand_var[grand_var == 0] = 1e-10
-
-    # Design matrix for batches
-    stand_data = (dat - grand_mean[:, None]) / np.sqrt(grand_var[:, None])
-
-    # Step 2: Estimate batch parameters (location gamma, scale delta^2)
-    gamma_hat = np.zeros((n_batch, n_genes))
-    delta_hat_sq = np.zeros((n_batch, n_genes))
-    for i, b in enumerate(unique_batches):
-        idx = batch_idx[b]
-        gamma_hat[i] = stand_data[:, idx].mean(axis=1)
-        delta_hat_sq[i] = stand_data[:, idx].var(axis=1, ddof=1)
-        delta_hat_sq[i][delta_hat_sq[i] == 0] = 1e-10
-
-    # Step 3: Empirical Bayes shrinkage (parametric)
-    gamma_bar = gamma_hat.mean(axis=1)
-    tau_sq = gamma_hat.var(axis=1, ddof=1)
-    tau_sq[tau_sq == 0] = 1e-10
-
-    # For delta: use inverse-gamma prior
-    m_bar = delta_hat_sq.mean(axis=1)
-    s_sq = delta_hat_sq.var(axis=1, ddof=1)
-    s_sq[s_sq == 0] = 1e-10
-
-    gamma_star = np.zeros_like(gamma_hat)
-    delta_star_sq = np.zeros_like(delta_hat_sq)
-
-    for i in range(n_batch):
-        n_b = n_per_batch[unique_batches[i]]
-        # Posterior for gamma (normal prior)
-        gamma_star[i] = (n_b * tau_sq[i] * gamma_hat[i] + delta_hat_sq[i] * gamma_bar[i]) / \
-                        (n_b * tau_sq[i] + delta_hat_sq[i])
-        # Posterior for delta_sq (inverse-gamma prior)
-        # Use shrinkage toward the grand mean
-        lambda_b = (m_bar[i] ** 2 + 2 * s_sq[i]) / s_sq[i]
-        theta_b = (m_bar[i] ** 3 + m_bar[i] * s_sq[i]) / s_sq[i]
-        theta_b = np.where(theta_b == 0, 1e-10, theta_b)
-        delta_star_sq[i] = (theta_b + 0.5 * n_b * delta_hat_sq[i]) / \
-                           (lambda_b / 2 + n_b / 2 - 1)
-        delta_star_sq[i] = np.maximum(delta_star_sq[i], 1e-10)
-
-    # Step 4: Adjust data
-    corrected = dat.copy()
-    for i, b in enumerate(unique_batches):
-        idx = batch_idx[b]
-        dsq = np.sqrt(delta_star_sq[i])
-        dsq[dsq == 0] = 1e-10
-        corrected[:, idx] = grand_mean[:, None] + np.sqrt(grand_var[:, None]) * \
-            (stand_data[:, idx] - gamma_star[i][:, None]) / dsq[:, None]
-
-    return pd.DataFrame(corrected, index=data.index, columns=data.columns)
 
 
 # ---------------------------------------------------------------------------
 # PCA + visualization
 # ---------------------------------------------------------------------------
 
-def _run_pca(data: pd.DataFrame, n_components: int = 2) -> np.ndarray:
-    """Simple PCA via SVD on centered data (genes x samples -> samples in PC space)."""
-    log_data = np.log2(data.values.astype(float) + 1)
-    centered = log_data - log_data.mean(axis=1, keepdims=True)
-    U, S, Vt = np.linalg.svd(centered.T, full_matrices=False)
-    return U[:, :n_components] * S[:n_components]
 
 
-def _silhouette_score(pc_coords: np.ndarray, labels: np.ndarray) -> float:
-    """Compute silhouette score (simplified). Higher = more separated batches."""
-    from scipy.spatial.distance import cdist
-    unique = np.unique(labels)
-    if len(unique) < 2:
-        return 0.0
-    dists = cdist(pc_coords, pc_coords, metric='euclidean')
-    n = len(labels)
-    sil = np.zeros(n)
-    for i in range(n):
-        same = labels == labels[i]
-        diff_labels = unique[unique != labels[i]]
-        a_i = dists[i, same].sum() / max(same.sum() - 1, 1)
-        b_i = min(dists[i, labels == dl].mean() for dl in diff_labels)
-        sil[i] = (b_i - a_i) / max(a_i, b_i, 1e-10)
-    return float(np.mean(sil))
+
+
 
 
 def generate_figures(output_dir: Path, expr_before: pd.DataFrame,
@@ -418,41 +278,19 @@ def main() -> None:
     batch_df = batch_df.set_index("sample")
     batch_labels = batch_df.loc[expr_df.columns, "batch"]
 
-    # Correction: try R sva::ComBat first, fall back to Python
-    logger.info("Running ComBat (%s mode) on %d genes x %d samples, %d batches",
-                args.mode, expr_df.shape[0], expr_df.shape[1],
-                batch_labels.nunique())
-
-    try:
-        corrected_df = _run_combat_r(
-            expr_df, batch_df.reset_index(),
-            parametric=(args.mode == "parametric"),
-        )
-        logger.info("R sva::ComBat completed successfully.")
-    except Exception as exc:
-        logger.warning("R ComBat not available (%s); using Python fallback.", exc)
-        corrected_df = _combat_correct(expr_df, batch_labels)
-
-    # Metrics
-    pc_before = _run_pca(expr_df)
-    pc_after = _run_pca(corrected_df)
-    sil_before = _silhouette_score(pc_before, batch_labels.values)
-    sil_after = _silhouette_score(pc_after, batch_labels.values)
-
-    summary = {
-        "n_genes": expr_df.shape[0],
-        "n_samples": expr_df.shape[1],
-        "n_batches": int(batch_labels.nunique()),
-        "batch_names": sorted(batch_labels.unique().tolist()),
-        "mode": args.mode,
-        "silhouette_before": round(sil_before, 4),
-        "silhouette_after": round(sil_after, 4),
-    }
+    from skills._sdk.notebook import load_skill
+    api = load_skill(SKILL_NAME)
+    corrected_df = api.correct(expr_df, batches=batch_df.reset_index(), mode=args.mode)
+    diagnostics = api.run_info(corrected_df, keep=False)
+    summary = diagnostics.pop("summary")
+    sil_before = summary["silhouette_before"]
+    sil_after = summary["silhouette_after"]
     params = {
         "input": str(input_path),
         "batch_info": args.batch_info or "demo",
         "output": str(output_dir),
         "mode": args.mode,
+        "run_info": diagnostics,
     }
 
     # Figures & report

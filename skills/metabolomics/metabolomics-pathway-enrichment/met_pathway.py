@@ -33,8 +33,8 @@ from skills._sdk.report import (
     generate_report_footer,
 )
 from skills._sdk.result import write_result_json
+from skills._sdk.notebook import load_skill
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "met-pathway"
@@ -45,184 +45,18 @@ SKILL_VERSION = "0.5.0"
 # Demo metabolic pathway database (KEGG-like)
 # IDs verified against KEGG (https://www.kegg.jp/kegg/pathway.html)
 # ---------------------------------------------------------------------------
-DEMO_METABOLIC_PATHWAYS = {
-    "Glycolysis / Gluconeogenesis": {
-        "kegg_id": "map00010",
-        "metabolites": [
-            "glucose", "glucose-6-phosphate", "fructose-6-phosphate",
-            "glyceraldehyde-3-phosphate", "pyruvate", "lactate",
-        ],
-    },
-    "Citrate cycle (TCA cycle)": {
-        "kegg_id": "map00020",
-        "metabolites": [
-            "citrate", "isocitrate", "alpha-ketoglutarate", "succinate",
-            "fumarate", "malate", "oxaloacetate",
-        ],
-    },
-    "Fatty acid biosynthesis": {
-        "kegg_id": "map00061",
-        "metabolites": [
-            "acetyl-CoA", "malonyl-CoA", "palmitate", "stearate", "oleate",
-        ],
-    },
-    "Purine metabolism": {
-        "kegg_id": "map00230",
-        "metabolites": [
-            "adenine", "guanine", "hypoxanthine", "xanthine",
-            "uric_acid", "inosine", "adenosine",
-        ],
-    },
-    "Pyrimidine metabolism": {
-        "kegg_id": "map00240",
-        "metabolites": ["uracil", "cytosine", "thymine", "uridine", "thymidine"],
-    },
-    "Alanine, aspartate and glutamate metabolism": {
-        "kegg_id": "map00250",
-        "metabolites": [
-            "alanine", "aspartate", "glutamate", "glutamine",
-            "asparagine", "oxaloacetate",
-        ],
-    },
-    "Glycine, serine and threonine metabolism": {
-        "kegg_id": "map00260",
-        "metabolites": ["glycine", "serine", "threonine", "pyruvate"],
-    },
-    "Tryptophan metabolism": {
-        "kegg_id": "map00380",
-        "metabolites": [
-            "tryptophan", "serotonin", "kynurenine", "indole",
-            "5-hydroxyindoleacetate",
-        ],
-    },
-    "Primary bile acid biosynthesis": {
-        "kegg_id": "map00120",
-        "metabolites": [
-            "cholesterol", "cholate", "chenodeoxycholate",
-            "taurocholate", "glycocholate",
-        ],
-    },
-}
-
-# Total background metabolite set (union of all pathways)
-_ALL_PATHWAY_METABOLITES = set()
-for _info in DEMO_METABOLIC_PATHWAYS.values():
-    _ALL_PATHWAY_METABOLITES.update(m.lower() for m in _info["metabolites"])
-
-
-# ---------------------------------------------------------------------------
-# Hypergeometric ORA
-# ---------------------------------------------------------------------------
-
-def _benjamini_hochberg(pvalues: np.ndarray) -> np.ndarray:
-    """Benjamini-Hochberg FDR correction."""
-    pv = np.asarray(pvalues, dtype=float)
-    n = len(pv)
-    if n == 0:
-        return pv
-    order = np.argsort(pv)
-    sorted_p = pv[order]
-    adjusted = np.empty(n)
-    adjusted[-1] = sorted_p[-1]
-    for i in range(n - 2, -1, -1):
-        adjusted[i] = min(sorted_p[i] * n / (i + 1), adjusted[i + 1])
-    adjusted = np.clip(adjusted, 0, 1)
-    result = np.empty(n)
-    result[order] = adjusted
-    return result
-
-
-def pathway_enrichment(
-    metabolite_list: list[str],
-    method: str = "ora",
-) -> pd.DataFrame:
-    """Over-representation analysis using the hypergeometric test.
-
-    For each pathway, the p-value is computed as::
-
-        P(X >= k) = 1 - hypergeom.cdf(k-1, N, K, n)
-
-    where
-
-    - N = total metabolites in the background (all pathway members)
-    - K = number of metabolites in the current pathway
-    - n = number of query (significant) metabolites that are in the background
-    - k = number of query metabolites that overlap with the pathway
-
-    Parameters
-    ----------
-    metabolite_list : list[str]
-        Query metabolite names (e.g., significant metabolites).
-    method : str
-        Analysis method label (informational).
-
-    Returns
-    -------
-    DataFrame with enrichment results, sorted by p-value, with FDR column.
-    """
-    logger.info(
-        "Pathway analysis: %d metabolites, method=%s",
-        len(metabolite_list), method,
-    )
-
-    query = set(m.lower() for m in metabolite_list)
-    N = len(_ALL_PATHWAY_METABOLITES)  # background size
-    n = len(query.intersection(_ALL_PATHWAY_METABOLITES))  # query hits in background
-
-    records: list[dict] = []
-
-    for pathway, info in DEMO_METABOLIC_PATHWAYS.items():
-        members = set(m.lower() for m in info["metabolites"])
-        K = len(members)  # pathway size
-        overlap = query.intersection(members)
-        k = len(overlap)  # hits
-
-        if k == 0:
-            continue
-
-        # Hypergeometric test: P(X >= k)
-        pval = float(sp_stats.hypergeom.sf(k - 1, N, K, n))
-
-        records.append({
-            "pathway": pathway,
-            "kegg_id": info["kegg_id"],
-            "hits": k,
-            "pathway_size": K,
-            "background_size": N,
-            "query_in_background": n,
-            "hit_metabolites": ";".join(sorted(overlap)),
-            "pvalue": pval,
-            "impact": round(k / K, 4),
-        })
-
-    df = pd.DataFrame(records)
-    if not df.empty:
-        df = df.sort_values("pvalue").reset_index(drop=True)
-        df["fdr"] = _benjamini_hochberg(df["pvalue"].values)
-
-    return df
-
+from skills.metabolomics._lib.pathways import DEMO_METABOLIC_PATHWAYS
 
 # ---------------------------------------------------------------------------
 # Demo data
 # ---------------------------------------------------------------------------
 
 def generate_demo_data(output_dir: Path) -> Path:
-    """Generate demo metabolite list."""
-    rng = np.random.default_rng(42)
-    metabolites = [
-        "glucose", "pyruvate", "lactate", "citrate", "succinate",
-        "glutamate", "alanine", "tryptophan", "serotonin",
-        "adenine", "uric_acid", "palmitate", "cholate",
-        "uracil", "glycine", "kynurenine",
-    ]
-    df = pd.DataFrame({
-        "metabolite": metabolites,
-        "log2fc": np.round(rng.normal(0.3, 1.0, len(metabolites)), 3),
-        "pvalue": np.round(rng.uniform(0.001, 0.05, len(metabolites)), 5),
-    })
+    """Build the seeded synthetic CLI fixture."""
+    from skills.metabolomics._lib.demo import pathway_enrichment
+    data = pathway_enrichment()
     path = output_dir / "demo_metabolites.csv"
-    df.to_csv(path, index=False)
+    data.to_csv(path, index=False)
     return path
 
 
@@ -289,6 +123,7 @@ def write_report(
 # ---------------------------------------------------------------------------
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Metabolomics Pathway Analysis")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -310,7 +145,10 @@ def main():
     met_col = "metabolite" if "metabolite" in df.columns else df.columns[0]
     metabolite_list = df[met_col].tolist()
 
-    result_df = pathway_enrichment(metabolite_list, method=args.method)
+    library = load_skill("metabolomics-pathway-enrichment")
+    result_df = library.enrich(metabolite_list, method=args.method)
+
+    library.run_info(result_df, keep=False)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)

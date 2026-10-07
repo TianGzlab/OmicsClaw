@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Genomics QC — Quality control for FASTQ / BAM sequencing data.
-
-Computes per-read quality metrics (Phred scores), GC/N content,
-read-length distribution, per-base quality profiles, and adapter
-contamination estimates. Mirrors outputs of FastQC / fastp.
-
-Usage:
-    python genomics_qc.py --input <file.fastq[.gz]> --output <dir>
-    python genomics_qc.py --demo --output <dir>
-"""
+"""Genomics qc: summarize existing local files.\n\nThe CLI owns demo generation, reports and file output. Its function library\ncontains the computations. No external analysis tool is started."""
 
 from __future__ import annotations
 
@@ -17,10 +8,8 @@ import gzip
 import logging
 import random
 import sys
-from collections import Counter
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 _SDK_ANCHOR = next(
@@ -36,7 +25,6 @@ from skills._sdk.report import (
 )
 from skills._sdk.result import write_result_json
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "genomics-qc"
@@ -63,105 +51,6 @@ def _open_fastq(path: Path):
     if str(path).endswith(".gz"):
         return gzip.open(path, "rt")
     return open(path, "r")
-
-
-def qc_fastq(fastq_path: Path, max_reads: int = 500_000) -> dict:
-    """Parse a FASTQ file and compute QC metrics.
-
-    Metrics computed (matching FastQC/fastp conventions):
-    - total_reads, total_bases
-    - mean_quality (average Phred across all bases)
-    - gc_content, n_content (as percentages)
-    - per_base_quality: list of mean Phred per position (first 150 bp)
-    - read_length_hist: Counter of read lengths
-    - adapter_contamination: fraction of reads containing adapter prefix
-    - q20_rate, q30_rate: fraction of bases >= Q20 / Q30
-    """
-    total_reads = 0
-    total_bases = 0
-    quality_sum = 0.0
-    gc_count = 0
-    n_count = 0
-    base_count = 0
-
-    max_pos = 300  # track per-base quality up to this length
-    pos_qual_sum = np.zeros(max_pos, dtype=np.float64)
-    pos_qual_cnt = np.zeros(max_pos, dtype=np.int64)
-
-    length_counter: Counter = Counter()
-    adapter_hits = 0
-
-    q20_bases = 0
-    q30_bases = 0
-
-    with _open_fastq(fastq_path) as fh:
-        while total_reads < max_reads:
-            header = fh.readline()
-            if not header:
-                break
-            seq = fh.readline().strip()
-            _plus = fh.readline()
-            qual_str = fh.readline().strip()
-
-            if not seq or not qual_str:
-                break
-
-            total_reads += 1
-            read_len = len(seq)
-            total_bases += read_len
-            length_counter[read_len] += 1
-
-            # GC / N content
-            seq_upper = seq.upper()
-            gc_count += seq_upper.count("G") + seq_upper.count("C")
-            n_count += seq_upper.count("N")
-            base_count += read_len
-
-            # Quality scores (Phred+33 encoding, standard for modern Illumina)
-            quals = [ord(c) - 33 for c in qual_str]
-            quality_sum += sum(quals)
-
-            for i, q in enumerate(quals):
-                if i < max_pos:
-                    pos_qual_sum[i] += q
-                    pos_qual_cnt[i] += 1
-                if q >= 20:
-                    q20_bases += 1
-                if q >= 30:
-                    q30_bases += 1
-
-            # Adapter check (look for adapter prefix in last 20 bp of read)
-            tail = seq_upper[-20:] if read_len >= 20 else seq_upper
-            for adapter in ADAPTER_SEQS:
-                if adapter[:8] in tail:
-                    adapter_hits += 1
-                    break
-
-    if total_reads == 0:
-        raise ValueError(f"No reads found in {fastq_path}")
-
-    # Per-base quality (trim trailing zeros)
-    valid_mask = pos_qual_cnt > 0
-    per_base_quality = []
-    for i in range(max_pos):
-        if pos_qual_cnt[i] > 0:
-            per_base_quality.append(round(pos_qual_sum[i] / pos_qual_cnt[i], 2))
-        else:
-            break
-
-    return {
-        "total_reads": total_reads,
-        "total_bases": total_bases,
-        "mean_quality": round(quality_sum / total_bases, 2) if total_bases else 0,
-        "gc_content": round(100 * gc_count / base_count, 2) if base_count else 0,
-        "n_content": round(100 * n_count / base_count, 4) if base_count else 0,
-        "mean_length": round(total_bases / total_reads, 1),
-        "q20_rate": round(100 * q20_bases / total_bases, 2) if total_bases else 0,
-        "q30_rate": round(100 * q30_bases / total_bases, 2) if total_bases else 0,
-        "adapter_contamination_pct": round(100 * adapter_hits / total_reads, 2),
-        "per_base_quality": per_base_quality,
-        "read_length_hist": dict(length_counter.most_common(20)),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +132,7 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
 # ---------------------------------------------------------------------------
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Genomics QC — FASTQ quality control")
     parser.add_argument("--input", dest="input_path", help="Input FASTQ file (.fastq or .fastq.gz)")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
@@ -264,7 +154,10 @@ def main():
             raise FileNotFoundError(f"Input file not found: {fastq_path}")
         input_file = args.input_path
 
-    result = qc_fastq(fastq_path, max_reads=args.max_reads)
+    from skills._sdk.notebook import load_skill
+    api = load_skill(SKILL_NAME)
+    table = api.analyze(api.read_records(fastq_path, max_reads=args.max_reads), max_reads=args.max_reads)
+    result = api.run_info(table, keep=False)["summary"]
 
     # Save tables
     tables_dir = output_dir / "tables"

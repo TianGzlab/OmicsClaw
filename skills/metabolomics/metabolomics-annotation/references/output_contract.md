@@ -1,21 +1,8 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-└── tables/
-    └── annotations.csv
-```
+`tables/annotations.csv`, `report.md` and `result.json`. The CLI writes `reproducibility/commands.sh`.
 
-## File contents
+The function library returns tables and Figures without file writes.
+`run_info` reads DataFrame diagnostics; `keep=False` removes them.
 
-- `tables/annotations.csv` — per-feature annotation match against the 15-entry `DEMO_METABOLITES` list (`metabolomics_annotation.py:57-74`). Columns: input `feature_id` / `mz`, plus matched `name`, `hmdb_id`, `formula`, `adduct`, `mass_error_ppm`. Written at `metabolomics_annotation.py:279`.
-- `report.md` — number of features matched, per-database / per-adduct counts.
-- `result.json` — `summary` includes `n_features`, `n_annotated`, `database` (recorded value, NOT used for lookup), `ppm`, `adducts`.
-
-## Notes
-
-- No `figures/` directory.
-- A feature with multiple matching candidates yields multiple rows.
-- The `--database` flag is metadata-only — annotation always uses the embedded HMDB list regardless.
+`annotate` rejects other database labels without reference data. Each query can have multiple candidate rows in `tables/annotations.csv`; Unknown rows retain unmatched queries. Confidence labels describe ppm bins, not identification probability.

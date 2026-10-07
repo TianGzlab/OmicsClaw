@@ -1,88 +1,122 @@
 ---
 name: proteomics-enrichment
-description: Load when running over-representation analysis (ORA) on a list of proteins via Fisher's exact
-  test against a built-in 8-pathway DEMO dictionary, with BH-FDR correction. Skip when needing a real
-  pathway database (this skill is demo-only) (use bulkrna-enrichment); rank-based GSEA.
-trigger: proteomics enrichment, pathway analysis, STRING, DAVID, g:Profiler, GO enrichment
+description: Load for Fisher over-representation analysis of protein identifiers against caller-supplied pathways. Skip rank-based GSEA (use bulkrna-enrichment) or protein differential testing (use proteomics-de).
+trigger: proteomics enrichment, pathway analysis, ORA
 tags:
 - proteomics
 - enrichment
-- ora
-- fisher
-- demo
-- pathway
 ---
 
 # proteomics-enrichment
 
 ## When to use
 
-The user has a CSV listing proteins of interest (e.g. the
-significant subset from `proteomics-de`, or the PTM-target list
-from `proteomics-ptm`) and wants over-representation enrichment
-via Fisher's exact test, with BH-adjusted FDR.
+ORA uses one-sided Fisher tests and BH correction. Pass an explicit pathway_db and a background_size matching the measured universe.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-**This is a demo-only enrichment.** The pathway database is the
-hard-coded 8-pathway `DEMO_PATHWAYS` dict at
-`prot_enrichment.py` (each pathway has 5 fixed members).
-There is NO CLI flag to load a real KEGG / Reactome / MSigDB
-library. For production proteomics enrichment, export your
-significant-protein list and call `bulkrna-enrichment` (which has
-real ORA + GSEA + ssGSEA backends with hosted libraries).
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-enrichment')
+data = library.demo_data(random_state=42)
+result = library.enrich(data['protein_id'].tolist(), pathway_db=library.demo_pathways())
+write_output(result, 'tables/enrichment_results.csv')
+```
 
-**Inputs**
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-- File types: `.csv`
-- Accepts artifact `proteomics.differential_results` (`csv`)
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/enrichment_results.csv`
-- `report.md`
-- `result.json`
+### `enrich(genes: list[str], *, pathway_db: dict | None=None, background_size: int | None=None, method: str='ora') -> pd.DataFrame`
 
-## Flow
+Run one-sided Fisher tests with BH correction against an explicit pathway library.
 
-1. Load CSV (`--input <proteins.csv>`) or generate a demo (`--demo`).
-2. Pick the gene-list column: `protein_id` if present, otherwise the first column (`prot_enrichment.py`).
-3. For each pathway in `DEMO_PATHWAYS` (`prot_enrichment.py`), run Fisher's exact test; apply BH FDR adjustment.
-4. Write `tables/enrichment_results.csv` (`prot_enrichment.py`) + `report.md` + `result.json`.
+:param genes: Protein or gene identifiers in the same identifier space as pathway_db.
+:param pathway_db: Required pathway-to-member mapping; no default biological database is assumed.
+:param background_size: CLI default None uses the input/library union plus at least one background-only member.
+:param method: CLI default ora is the only implemented method.
+:returns: Ranked pathway overlaps, odds ratios and adjusted p values.
+:raises ValueError: The library is absent, the method is invalid, or the background is too small.
+
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read enrichment diagnostics.
+
+:param table: Output of enrich.
+:param keep: True preserves attrs; False removes diagnostics.
+:returns: A separate dictionary with library provenance and summary.
+:raises TypeError: The input is not a DataFrame.
+
+### `enrichment_figure(table: pd.DataFrame, *, top_n: int=10)`
+
+Plot leading pathways by enrichment ratio.
+
+:param table: Enrichment results sorted by p value.
+:param top_n: Display ten pathways by default; change for a larger result table.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: pathway or enrichment_ratio is absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate a synthetic significant-protein list.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: Eighteen example identifiers with simulated statistics.
+:raises ValueError: The seed is invalid.
+
+### `demo_pathways() -> dict`
+
+Return the eight small illustrative pathway sets used by --demo.
+
+:returns: A separate mapping, not a production pathway database.
+:raises RuntimeError: No runtime failures are expected.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+ORA uses one-sided Fisher tests and BH correction. Pass an explicit pathway_db and a background_size matching the measured universe.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **Pathway database is HARD-CODED 8 demo pathways.** `prot_enrichment.py` defines 8 pathways × 5 genes each (e.g. cell-cycle, apoptosis, TCA-cycle). There is no CLI for loading real databases. The `n_pathways_tested = 8` in `result.json` is a constant, not a function of input. For real enrichment, route to `bulkrna-enrichment`.
-- **Method is Fisher's exact, not hypergeometric.** Mathematically equivalent for over-representation, but the script and report (`prot_enrichment.py`) consistently say "Fisher's". Hypergeometric is the same distribution but the "Fisher's exact test" naming is what shows in the report.
-- **Default background ≠ a real proteome size.** `prot_enrichment.py` sets `background_size = max(len(gene_set | all_pathway_genes), len(gene_set) + 1)` — for the demo's 8 pathways that's ~40 + n_input. **Always pass `--background-size N` (e.g. 20000 for human, 8000 for your detected proteome) for real enrichment** — the auto-default produces meaningless p-values on a real dataset.
-- **`--species` is RECORDED-ONLY.** `prot_enrichment.py` accepts `--species` but the value is never used to switch databases or filter pathways — it's logged into `result.json` for reproducibility only.
-- **Gene-list column auto-detection: `protein_id` first, else first column.** `prot_enrichment.py` uses `gene_col = "protein_id" if "protein_id" in df.columns else df.columns[0]`. If your CSV has multiple ID columns (`gene`, `uniprot`, `symbol`), only `protein_id` is preferred — pre-rename the column you want enriched.
-- **`--input` REQUIRED unless `--demo`.** `prot_enrichment.py` raises `ValueError("--input required when not using --demo")`.
+- enrich requires pathway_db. demo_pathways contains eight illustrative sets and is only for demonstrations. The CLI requires --pathways for non-demo input; --species is recorded only.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/enrichment_results.csv
+- report.md
+- result.json
+- `demo_proteins.csv` is written only with `--demo`.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo (8-pathway DEMO_PATHWAYS dict)
-python skills/proteomics/proteomics-enrichment/prot_enrichment.py --demo --output /tmp/enr_demo
-
-# Real protein list — pass real background size!
-python skills/proteomics/proteomics-enrichment/prot_enrichment.py \
-  --input significant.csv --output results/ \
-  --background-size 20000
-
-# For real pathway databases, use bulkrna-enrichment instead:
-# python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py --input significant.csv ...
+python skills/proteomics/proteomics-enrichment/prot_enrichment.py --demo --output /tmp/proteomics_enrichment
 ```
+
+For real input replace `--demo` with `--input <table>`.
+Non-demo enrichment also requires `--pathways <pathways.json>`, a pathway-to-members object.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — Fisher's exact ORA, BH FDR, demo-DB caveats
-- `references/output_contract.md` — `tables/enrichment_results.csv` schema
-- Adjacent skills: `proteomics-de` (upstream — produces significant protein lists), `proteomics-ptm` (upstream — PTM-target lists), `proteomics-quantification` (upstream — protein-level abundance), `bulkrna-enrichment` (parallel — REAL pathway databases + GSEA + ssGSEA)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`, `scipy`
+`numpy`, `pandas`, `matplotlib`, `scipy`

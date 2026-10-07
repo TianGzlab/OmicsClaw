@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """bulkrna-trajblend — Bulk→single-cell trajectory interpolation.
 
-Bridges bulk RNA-seq with scRNA-seq reference to estimate cell fractions,
-generate synthetic single-cell profiles, and map bulk onto developmental
-trajectories. Pure-Python/NumPy fallback when PyTorch is unavailable.
+Estimates cell fractions with NNLS and places bulk samples on a supplied
+reference trajectory with joint PCA and nearest neighbors.
 
 Usage:
     python bulkrna_trajblend.py --demo --output results/
@@ -22,10 +21,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.optimize import nnls
-from sklearn.decomposition import PCA
-from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import StandardScaler
 
 _SDK_ANCHOR = next(
     (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
@@ -46,160 +41,9 @@ SKILL_VERSION = "0.3.0"
 
 
 # ---------------------------------------------------------------------------
-# Demo Data
-# ---------------------------------------------------------------------------
-
-def _generate_demo_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, np.ndarray]:
-    """Generate demo bulk + scRNA-seq reference with trajectory.
-
-    Returns: (bulk_counts, ref_counts, ref_celltypes, ref_pseudotime)
-    """
-    np.random.seed(42)
-    n_genes = 500
-    n_bulk = 10
-    n_cells = 800
-    genes = [f"Gene_{i}" for i in range(n_genes)]
-    cell_types = ["Progenitor", "Intermediate", "Mature_A", "Mature_B"]
-
-    # Reference scRNA-seq: 4 cell types along a trajectory
-    ref_data = np.zeros((n_cells, n_genes))
-    ref_labels = []
-    ref_pt = np.zeros(n_cells)
-
-    cells_per_type = n_cells // len(cell_types)
-    for ti, ct in enumerate(cell_types):
-        idx = slice(ti * cells_per_type, (ti + 1) * cells_per_type)
-        # Each cell type has different expression profiles
-        base = np.random.exponential(5, n_genes)
-        # Cell-type specific marker genes (50 per type)
-        markers = np.arange(ti * 50, (ti + 1) * 50) % n_genes
-        base[markers] *= np.random.uniform(5, 15)
-        for j in range(cells_per_type):
-            noise = np.random.exponential(1, n_genes)
-            ref_data[ti * cells_per_type + j] = base + noise
-        ref_labels.extend([ct] * cells_per_type)
-        # Pseudotime increases with cell type progression
-        ref_pt[idx] = np.linspace(ti * 0.25, (ti + 1) * 0.25, cells_per_type) + \
-                      np.random.normal(0, 0.02, cells_per_type)
-
-    ref_pt = np.clip(ref_pt, 0, 1)
-
-    # Bulk data: mixtures of cell types
-    bulk_data = np.zeros((n_bulk, n_genes))
-    true_fractions = np.random.dirichlet([2, 3, 4, 1], n_bulk)
-    for i in range(n_bulk):
-        for ti, ct in enumerate(cell_types):
-            ct_mean = ref_data[ti * cells_per_type:(ti + 1) * cells_per_type].mean(axis=0)
-            bulk_data[i] += true_fractions[i, ti] * ct_mean * np.random.uniform(80, 120)
-    bulk_data = np.round(bulk_data).astype(int)
-
-    bulk_df = pd.DataFrame(bulk_data, columns=genes,
-                           index=[f"BulkSample_{i}" for i in range(n_bulk)])
-    ref_df = pd.DataFrame(ref_data, columns=genes,
-                          index=[f"Cell_{i}" for i in range(n_cells)])
-
-    return bulk_df, ref_df, pd.Series(ref_labels, index=ref_df.index), ref_pt
-
-
-# ---------------------------------------------------------------------------
 # Core Analysis
 # ---------------------------------------------------------------------------
 
-def estimate_fractions(bulk: pd.DataFrame, ref: pd.DataFrame,
-                       ref_labels: pd.Series) -> pd.DataFrame:
-    """Estimate cell type fractions via NNLS deconvolution."""
-    cell_types = sorted(ref_labels.unique())
-
-    # Build signature matrix: mean expression per cell type
-    sig = pd.DataFrame(index=ref.columns)
-    for ct in cell_types:
-        ct_cells = ref_labels[ref_labels == ct].index
-        sig[ct] = ref.loc[ct_cells].mean(axis=0)
-
-    # Common genes
-    common = bulk.columns.intersection(sig.index)
-    if len(common) < 50:
-        raise ValueError(f"Only {len(common)} common genes — need >= 50")
-
-    S = sig.loc[common].values  # genes x cell_types
-    fractions = {}
-    for sample in bulk.index:
-        b = bulk.loc[sample, common].values.astype(float)
-        x, _ = nnls(S, b)
-        x_norm = x / x.sum() if x.sum() > 0 else x
-        fractions[sample] = dict(zip(cell_types, x_norm))
-
-    return pd.DataFrame(fractions).T
-
-
-def generate_synthetic_cells(ref: pd.DataFrame, ref_labels: pd.Series,
-                             fractions: pd.DataFrame,
-                             n_synthetic_per_sample: int = 100) -> pd.DataFrame:
-    """Generate synthetic cells weighted by estimated fractions."""
-    np.random.seed(42)
-    cell_types = sorted(ref_labels.unique())
-    ct_indices = {ct: ref_labels[ref_labels == ct].index.tolist()
-                  for ct in cell_types}
-
-    synth_rows = []
-    synth_labels = []
-    for sample in fractions.index:
-        for ct in cell_types:
-            n = max(1, int(fractions.loc[sample, ct] * n_synthetic_per_sample))
-            source_cells = ct_indices[ct]
-            chosen = np.random.choice(source_cells, min(n, len(source_cells)), replace=True)
-            for cell_id in chosen:
-                noise = np.random.normal(1.0, 0.05, ref.shape[1]).clip(0.5, 1.5)
-                synth_rows.append(ref.loc[cell_id].values * noise)
-                synth_labels.append(f"{sample}_{ct}")
-
-    synth_df = pd.DataFrame(synth_rows, columns=ref.columns,
-                            index=[f"Synth_{i}" for i in range(len(synth_rows))])
-    return synth_df
-
-
-def map_bulk_to_trajectory(bulk: pd.DataFrame, ref: pd.DataFrame,
-                           ref_pseudotime: np.ndarray,
-                           k: int = 15) -> pd.DataFrame:
-    """Map bulk samples onto reference trajectory via PCA + KNN."""
-    common = bulk.columns.intersection(ref.columns)
-
-    combined = pd.concat([ref[common], bulk[common]], axis=0)
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(np.log1p(combined.values))
-
-    pca = PCA(n_components=min(20, scaled.shape[1], scaled.shape[0]))
-    pcs = pca.fit_transform(scaled)
-
-    n_ref = ref.shape[0]
-    ref_pcs = pcs[:n_ref]
-    bulk_pcs = pcs[n_ref:]
-
-    # KNN mapping
-    nn = NearestNeighbors(n_neighbors=k, metric="euclidean")
-    nn.fit(ref_pcs)
-    dists, indices = nn.kneighbors(bulk_pcs)
-
-    results = []
-    for i, sample in enumerate(bulk.index):
-        neighbor_pts = ref_pseudotime[indices[i]]
-        mean_pt = float(np.mean(neighbor_pts))
-        std_pt = float(np.std(neighbor_pts))
-        results.append({
-            "sample": sample,
-            "pseudotime": round(mean_pt, 4),
-            "pseudotime_std": round(std_pt, 4),
-            "mean_neighbor_dist": round(float(np.mean(dists[i])), 4),
-            "pc1": float(bulk_pcs[i, 0]),
-            "pc2": float(bulk_pcs[i, 1]),
-        })
-
-    return pd.DataFrame(results).set_index("sample"), ref_pcs, bulk_pcs, pca
-
-
-# ---------------------------------------------------------------------------
-# Figures
-# ---------------------------------------------------------------------------
 
 def generate_figures(output_dir: Path, fractions: pd.DataFrame,
                      pt_results: pd.DataFrame,
@@ -288,10 +132,6 @@ def generate_figures(output_dir: Path, fractions: pd.DataFrame,
     return paths
 
 
-# ---------------------------------------------------------------------------
-# Report
-# ---------------------------------------------------------------------------
-
 def write_report(output_dir: Path, fractions: pd.DataFrame,
                  pt_results: pd.DataFrame, params: dict) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -345,18 +185,17 @@ def write_report(output_dir: Path, fractions: pd.DataFrame,
         f"--output {params.get('output', '<OUTPUT>')}\n", encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 def main():
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     ap = argparse.ArgumentParser(description=f"{SKILL_NAME} v{SKILL_VERSION}")
     ap.add_argument("--input", type=str, help="Bulk count matrix (CSV/TSV)")
     ap.add_argument("--reference", type=str, help="scRNA-seq reference (h5ad or CSV)")
     ap.add_argument("--output", type=str, required=True)
     ap.add_argument("--demo", action="store_true")
-    ap.add_argument("--n-epochs", type=int, default=50, help="VAE epochs (unused in fallback)")
+    ap.add_argument("--random-state", type=int, default=42)
+    ap.add_argument("--n-epochs", type=int, default=50, help="Unused compatibility option; no model training occurs")
     args = ap.parse_args()
 
     output_dir = Path(args.output)
@@ -364,42 +203,26 @@ def main():
 
     if args.demo:
         logger.info("Generating demo data...")
-        bulk, ref, ref_labels, ref_pt = _generate_demo_data()
+        bulk, ref, ref_labels, ref_pt = library.demo_data(random_state=args.random_state)
         params["input"] = "demo"
         params["reference"] = "demo"
     else:
         if not args.input or not args.reference:
             ap.error("--input and --reference required (or use --demo)")
-        bulk = pd.read_csv(args.input, index_col=0)
+        bulk = pd.read_csv(args.input, index_col=0, sep="\t" if Path(args.input).suffix == ".tsv" else ",")
         params["input"] = args.input
         params["reference"] = args.reference
 
-        # Try loading reference
-        ref_path = Path(args.reference)
-        if ref_path.suffix == ".h5ad":
-            try:
-                import anndata as ad
-                adata = ad.read_h5ad(ref_path)
-                ref = pd.DataFrame(adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X,
-                                   index=adata.obs_names, columns=adata.var_names)
-                ref_labels = adata.obs.get("cell_type", adata.obs.iloc[:, 0])
-                ref_pt = adata.obs.get("pseudotime",
-                                       pd.Series(np.zeros(adata.n_obs), index=adata.obs_names)).values
-            except ImportError:
-                ap.error("anndata required for .h5ad reference files")
-        else:
-            ref = pd.read_csv(ref_path, index_col=0)
-            ref_labels = pd.Series(["Unknown"] * ref.shape[0], index=ref.index)
-            ref_pt = np.zeros(ref.shape[0])
+        ref, ref_labels, ref_pt = library.read_reference(args.reference)
 
-    # 1. Estimate cell type fractions
-    logger.info("Step 1: Estimating cell type fractions...")
-    fractions = estimate_fractions(bulk, ref, ref_labels)
-
-    # 2. Map to trajectory
-    logger.info("Step 2: Mapping bulk to trajectory...")
-    pt_results, ref_pcs, bulk_pcs, pca = map_bulk_to_trajectory(
-        bulk, ref, ref_pt, k=15)
+    pt_results = library.map_trajectory(bulk, reference=ref, labels=ref_labels,
+                                        pseudotime=ref_pt, random_state=args.random_state)
+    fractions = library.fractions(pt_results)
+    diagnostics = library.run_info(pt_results, keep=False)
+    ref_pcs, bulk_pcs = diagnostics['reference_pcs'], diagnostics['bulk_pcs']
+    ref_pt = ref_pt.to_numpy()
+    params['random_state'] = args.random_state
+    params['method'] = diagnostics['method']
 
     # 3. Generate figures
     logger.info("Step 3: Generating visualizations...")

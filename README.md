@@ -34,7 +34,7 @@ terminal, in the desktop app and on chat platforms.
 
 ## What's new
 
-- The 27 single-cell and 16 spatial analysis skills expose function libraries and replayable examples; four raw-input skills stay CLI-only, and modules support Python/R steps with IO tracking and review before acceptance ([0074](docs/plans/0074-singlecell-skill-migration.md), [0075](docs/plans/0075-spatial-skill-migration.md)).
+- Across seven domains, 83 skills expose function libraries and replayable examples; five remain CLI-only, including the demo-only XCMS stub, and Python/R modules support IO tracking and review before acceptance ([0074](docs/plans/0074-singlecell-skill-migration.md), [0075](docs/plans/0075-spatial-skill-migration.md), [0076](docs/plans/0076-remaining-modalities-migration.md)).
 - A real-model routing eval (`tests/evals/live/`, run by hand) measures whether the model picks the right skill for 26 seed requests, the CI unit-test job now also runs the launch shell, attachments, top-level and desktop HTTP tests, and the four consensus skills whose scripts could not start have since been deleted ([0068](docs/plans/0068-eval-hardening.md), [0070](docs/plans/0070-notebook-skill-runtime.md)).
 - The agent framework has been rebuilt around three entry points, `oc cli`, `oc desktop` and `oc channel`, and the old `oc interactive`, `oc tui`, `oc onboard` and `oc run` commands are gone ([rebuild status](docs/FRAMEWORK-REBUILD.md)).
 - The Desktop App works with the rebuilt backend, including remote mode over SSH and setting up a model from the App ([0064](docs/plans/0064-desktop-app-alignment.md), [0065](docs/plans/0065-desktop-management-pages-and-retirement.md), [0066](docs/plans/0066-desktop-remote-mode.md)).

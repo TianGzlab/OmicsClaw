@@ -17,13 +17,73 @@ tags:
 
 ## When to use
 
-Run AFTER rMATS or SUPPA2 has produced its splicing-event table — this
-skill consumes that output (not raw alignments).  Computes per-event
-ΔPSI (delta percent-spliced-in), flags events crossing significance and
-ΔPSI thresholds, and groups results by event type (SE / A3SS / A5SS /
-MXE / RI).
+Summarize existing splicing tests; this skill does not call rMATS or SUPPA2. See the description for adjacent skills.
 
-## Inputs & Outputs
+## Use from a step
+
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("bulkrna-splicing")
+# Supply DataFrames read with read_input(..., reader=...) for your CSV layout.
+result = library.summarize(events)
+write_output(result, "tables/result.csv")
+```
+
+The synthetic worked step is in `examples/example_step.py`.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `summarize(events, *, dpsi_cutoff=0.1, padj_cutoff=0.05)`
+
+Summarize upstream event tests without changing the table.
+
+:param events: DataFrame with gene, event_type, delta_psi and padj columns.
+:param dpsi_cutoff: CLI default 0.1; absolute delta-PSI must exceed it.
+:param padj_cutoff: CLI default 0.05; adjusted p values must be below it.
+:returns: Copy of events with diagnostics in attrs.
+:raises ValueError: Required columns, probabilities or thresholds are invalid.
+
+### `run_info(result, *, keep=True)`
+
+Read event counts and threshold diagnostics.
+
+:param result: DataFrame returned by summarize.
+:param keep: Default True; False removes diagnostic attrs.
+:returns: Diagnostic dictionary, empty after removal.
+
+### `significant_events(result)`
+
+Return events passing both strict thresholds.
+
+:param result: DataFrame returned by summarize, with diagnostics retained.
+:returns: New filtered DataFrame.
+:raises KeyError: Diagnostics are absent.
+
+### `volcano_figure(result)`
+
+Plot delta-PSI against upstream adjusted significance.
+
+:param result: Event table with delta_psi and padj.
+:returns: A matplotlib Figure, without writing files.
+:raises KeyError: Required columns are absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
+
+## Gotchas
+
+- `summarize` uses strict `abs(delta_psi) > dpsi_cutoff` and `padj < padj_cutoff`.
+- Rename upstream columns to `gene`, `event_type`, `delta_psi`, `padj`; `summarize` rejects missing fields.
+- `significant_events` filters supplied p values; it does not estimate significance.
+
+## Inputs and outputs
+
+The library returns objects without file writes. CLI inventory:
 
 **Inputs**
 
@@ -39,41 +99,16 @@ MXE / RI).
 - `report.md`
 - `result.json`
 
-## Flow
-
-1. Load splicing event table.  Hard-fail at `bulkrna_splicing.py` on missing or invalid `--input`.
-2. Validate the fixed input schema: must contain columns `event_type, gene, delta_psi, padj` (`bulkrna_splicing.py`).  No format detection — caller must pre-flatten rMATS / SUPPA2 output to this schema.
-3. Filter by `--dpsi-cutoff` AND `--padj-cutoff`.
-4. Group by event type; render distribution + volcano + bar plots.
-5. Emit `tables/splicing_events.csv` (full) + `tables/significant_events.csv` (filtered) + report.
-
-## Gotchas
-
-- **This skill consumes the SPLICING TABLE, not BAM or FASTQ.**  Run rMATS or SUPPA2 upstream and feed their output here.  The wrapper does not perform splicing detection itself — feeding it BAM files raises a parser error or silently produces an empty result.
-- **`--dpsi-cutoff` is the ABSOLUTE value of ΔPSI.**  Default `0.1` keeps events with `|ΔPSI| ≥ 0.1`, including both inclusion-up and inclusion-down.  Set to `0` to keep all directionally significant events.
-- **Input schema is fixed: `event_type, gene, delta_psi, padj` (with optional `pvalue` and `event_id`).**  The script does NOT auto-detect rMATS vs SUPPA2 column conventions — if your input uses rMATS's `IncLevelDifference`/`FDR` or SUPPA2's `dPSI`/`pval` natively, rename columns first or the loader will silently drop your data.
-- **Event-type breakdown depends on the upstream tool's classification.**  rMATS reports SE / A3SS / A5SS / MXE / RI as separate files; SUPPA2 uses an EVENT field.  Concatenate / re-label these into a single `event_type` column before feeding the skill, or the breakdown bar chart under-counts.
-
-## Key CLI
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py --demo --output /tmp/bulkrna-splicing_demo
-python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py \
-  --input rmats_se.csv --output results/
-python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py \
-  --input suppa2_events.csv --output results/ \
-  --dpsi-cutoff 0.2 --padj-cutoff 0.01
+python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py --demo --output /tmp/bulkrna-splicing
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — rMATS vs SUPPA2 format conventions, event-type taxonomy
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-de` (parallel: gene-level DE, complements exon-level splicing), `bulkrna-enrichment` (downstream: pathway view of splicing-affected genes via gene-symbol mapping)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `matplotlib`, `numpy`, `pandas`, `scipy`

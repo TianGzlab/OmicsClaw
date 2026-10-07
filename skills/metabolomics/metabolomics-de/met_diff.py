@@ -31,8 +31,8 @@ from skills._sdk.report import (
     generate_report_footer,
 )
 from skills._sdk.result import write_result_json
+from skills._sdk.notebook import load_skill
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "met-diff"
@@ -44,183 +44,17 @@ SKILL_VERSION = "0.5.0"
 # ---------------------------------------------------------------------------
 
 def generate_demo_data(output_dir: Path) -> Path:
-    """Generate demo quantified feature table with condition labels."""
-    rng = np.random.default_rng(42)
-    n_features = 100
-    n_per_group = 4
-
-    data = {"feature_id": [f"M{i:04d}" for i in range(n_features)]}
-
-    # Control group
-    for s in range(n_per_group):
-        data[f"ctrl_{s + 1}"] = np.round(rng.lognormal(10, 1.5, n_features), 2)
-
-    # Treatment group — first 20 features are differentially abundant
-    for s in range(n_per_group):
-        vals = rng.lognormal(10, 1.5, n_features)
-        vals[:20] *= rng.uniform(1.5, 3.0, 20)
-        data[f"treat_{s + 1}"] = np.round(vals, 2)
-
-    df = pd.DataFrame(data)
+    """Build the seeded synthetic CLI fixture."""
+    from skills.metabolomics._lib.demo import de
+    data = de()
     path = output_dir / "demo_quantified.csv"
-    df.to_csv(path, index=False)
-    logger.info("Generated demo data: %s", path)
+    data.to_csv(path, index=False)
     return path
 
 
 # ---------------------------------------------------------------------------
 # Univariate analysis
 # ---------------------------------------------------------------------------
-
-def _benjamini_hochberg(pvalues: np.ndarray) -> np.ndarray:
-    """Benjamini-Hochberg FDR correction (manual, scipy-version-agnostic).
-
-    Identical to R's p.adjust(method="BH") / statsmodels multipletests("fdr_bh").
-    """
-    pvalues = np.asarray(pvalues, dtype=float)
-    n = len(pvalues)
-    if n == 0:
-        return pvalues
-
-    # Sort p-values and record original order
-    order = np.argsort(pvalues)
-    sorted_p = pvalues[order]
-
-    # BH adjusted p-value: p_adj[i] = min(p[i] * n / rank[i], 1)
-    # enforcing monotonicity from the largest rank downward
-    adjusted = np.empty(n, dtype=float)
-    adjusted[-1] = sorted_p[-1]  # last rank
-    for i in range(n - 2, -1, -1):
-        rank = i + 1
-        adjusted[i] = min(sorted_p[i] * n / rank, adjusted[i + 1])
-    adjusted = np.clip(adjusted, 0, 1)
-
-    # Restore original order
-    result = np.empty(n, dtype=float)
-    result[order] = adjusted
-    return result
-
-
-def run_univariate(
-    df: pd.DataFrame,
-    group_a_cols: list[str],
-    group_b_cols: list[str],
-) -> pd.DataFrame:
-    """Run Welch's t-test for each feature between two groups.
-
-    Uses ``scipy.stats.ttest_ind(equal_var=False)`` — Welch's t-test is
-    recommended for metabolomics because equal variance cannot be assumed
-    across all metabolites.
-    """
-    from scipy import stats as sp_stats
-
-    records: list[dict] = []
-    feature_col = df.columns[0]
-
-    for _, row in df.iterrows():
-        a_vals = row[group_a_cols].values.astype(float)
-        b_vals = row[group_b_cols].values.astype(float)
-
-        # Guard: if both groups have zero variance, skip test
-        if np.std(a_vals) == 0 and np.std(b_vals) == 0:
-            pval = 1.0
-            tstat = 0.0
-        else:
-            tstat, pval = sp_stats.ttest_ind(a_vals, b_vals, equal_var=False)
-
-        # Safe log2 fold-change
-        mean_a = float(np.mean(a_vals))
-        mean_b = float(np.mean(b_vals))
-        if mean_a > 0 and mean_b > 0:
-            log2fc = np.log2(mean_b / mean_a)
-        elif mean_a > 0:
-            log2fc = -np.inf
-        elif mean_b > 0:
-            log2fc = np.inf
-        else:
-            log2fc = 0.0
-
-        records.append({
-            "feature_id": row[feature_col],
-            "mean_group_a": round(mean_a, 4),
-            "mean_group_b": round(mean_b, 4),
-            "log2fc": round(float(log2fc), 4) if np.isfinite(log2fc) else float(log2fc),
-            "tstat": round(float(tstat), 4),
-            "pvalue": float(pval),
-        })
-
-    result = pd.DataFrame(records)
-
-    # FDR correction (Benjamini-Hochberg)
-    result["fdr"] = _benjamini_hochberg(result["pvalue"].values)
-
-    return result.sort_values("pvalue").reset_index(drop=True)
-
-
-# ---------------------------------------------------------------------------
-# PCA
-# ---------------------------------------------------------------------------
-
-def run_pca(
-    df: pd.DataFrame,
-    sample_cols: list[str],
-    group_a_cols: list[str],
-    group_b_cols: list[str],
-    output_dir: Path,
-) -> np.ndarray:
-    """Run PCA and save a labelled scores plot.
-
-    Returns the explained variance ratios.
-    """
-    from sklearn.decomposition import PCA
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    X = df[sample_cols].values.T  # samples × features
-    X = np.nan_to_num(X, nan=0.0)
-
-    n_components = min(2, X.shape[0], X.shape[1])
-    pca = PCA(n_components=n_components)
-    scores = pca.fit_transform(X)
-
-    fig_dir = output_dir / "figures"
-    fig_dir.mkdir(parents=True, exist_ok=True)
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    # Colour by group
-    colours = []
-    for col in sample_cols:
-        if col in group_a_cols:
-            colours.append("steelblue")
-        elif col in group_b_cols:
-            colours.append("coral")
-        else:
-            colours.append("grey")
-
-    y_vals = scores[:, 1] if scores.shape[1] > 1 else np.zeros(len(scores))
-
-    ax.scatter(scores[:, 0], y_vals, c=colours, s=60, edgecolors="k", linewidths=0.5)
-    for i, name in enumerate(sample_cols):
-        ax.annotate(name, (scores[i, 0], y_vals[i]), fontsize=7, alpha=0.8)
-
-    ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0] * 100:.1f}%)")
-    if scores.shape[1] > 1:
-        ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1] * 100:.1f}%)")
-    ax.set_title("PCA Scores Plot")
-    ax.legend(
-        handles=[
-            plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="steelblue", label="Group A"),
-            plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="coral", label="Group B"),
-        ],
-        loc="best",
-    )
-    plt.savefig(fig_dir / "pca_scores.png", dpi=150, bbox_inches="tight")
-    plt.close()
-
-    return pca.explained_variance_ratio_
-
 
 # ---------------------------------------------------------------------------
 # Report
@@ -267,6 +101,7 @@ def write_report(
 # ---------------------------------------------------------------------------
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Metabolomics Differential Analysis")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -297,7 +132,10 @@ def main():
         )
 
     # Univariate analysis
-    de_result = run_univariate(df, group_a_cols, group_b_cols)
+    library = load_skill("metabolomics-de")
+    de_result = library.differential_expression(df, group_a_prefix=args.group_a_prefix, group_b_prefix=args.group_b_prefix)
+
+    library.run_info(de_result, keep=False)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
@@ -310,7 +148,9 @@ def main():
     # PCA
     sample_cols = group_a_cols + group_b_cols
     try:
-        run_pca(df, sample_cols, group_a_cols, group_b_cols, output_dir)
+        figure = library.pca_figure(df, group_a_prefix=args.group_a_prefix, group_b_prefix=args.group_b_prefix)
+        (output_dir / "figures").mkdir(exist_ok=True)
+        figure.savefig(output_dir / "figures" / "pca_scores.png", dpi=150, bbox_inches="tight")
     except Exception as e:
         logger.warning("PCA failed: %s", e)
 

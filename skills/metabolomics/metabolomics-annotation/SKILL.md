@@ -1,8 +1,7 @@
 ---
 name: metabolomics-annotation
 description: Load when annotating LC-MS features against a built-in 15-metabolite HMDB demo dictionary
-  by m/z within a `--ppm` tolerance — emits a per-feature annotation table. Skip when needing real HMDB
-  / KEGG / LipidMaps / METLIN look-up (this skill is demo-only); raw spectra (use metabolomics-xcms-preprocessing).
+  by m/z within a `--ppm` tolerance — emits a per-feature annotation table. Skip when needing spectral matching or online database searches (use external SIRIUS / GNPS).
 trigger: metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching, metabolite ID, ppm tolerance
 tags:
 - metabolomics
@@ -16,65 +15,84 @@ tags:
 
 ## When to use
 
-The user has a feature table with `mz` (m/z) values and wants
-each feature annotated by m/z match to a metabolite database.
-**This is demo-only annotation.** The reference is an 15-entry
-HMDB dictionary (`metabolomics_annotation.py`: e.g. Glucose,
-Lactic acid, Alanine, Pyruvic acid, Citric acid, Tryptophan).
-`--database {hmdb,kegg,lipidmaps,metlin}` is recorded as metadata
-but does NOT switch the lookup table.
+Match m/z to adduct masses in an explicit reference or the bundled 15-metabolite demo. Use external SIRIUS/GNPS for spectral or database-scale identification.
 
-For real database-scale annotation use SIRIUS / GNPS / MetFrag
-externally and feed the resulting annotation CSV into a downstream
-skill.
+## Use from a step
 
-## Inputs & Outputs
+```python
+import pandas as pd
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("metabolomics-annotation")
+data = read_input('features.csv', reader=pd.read_csv)
+result = library.annotate(data)
+write_output(result, 'tables/result.csv')
+```
 
-**Inputs**
+[examples/example_step.py](examples/example_step.py) runs a seeded synthetic
+example through the step runner and writes a table and Figure. Computations
+return new DataFrames, leave the input unchanged and expose diagnostics through
+`run_info(result)`. Plotting functions write no files.
 
-- File types: `.csv`
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/annotations.csv`
-- `report.md`
-- `result.json`
+### `annotate(data, *, database='hmdb', ppm=10.0, adducts=None, reference=None)`
 
-## Flow
+Match every observed m/z to all reference adducts within tolerance.
 
-1. Load CSV (`--input <features.csv>`) or generate a demo (`--demo`).
-2. For each input `mz`, search the 15-entry HMDB dictionary (`metabolomics_annotation.py`) within `--ppm` tolerance.
-3. Write `tables/annotations.csv` (`metabolomics_annotation.py`) + `report.md` + `result.json`.
+:param data: Feature DataFrame with a numeric mz column.
+:param database: CLI default hmdb; other labels require an explicit reference.
+:param ppm: CLI default 10; nonnegative mass error tolerance in parts per million.
+:param adducts: CLI default None resolves to [M+H]+ and [M-H]-.
+:param reference: Optional DataFrame with name, neutral_mass, database_id and formula; None uses 15 demo metabolites.
+:returns: A new annotations DataFrame; attrs['run_info'] names the reference scope.
+:raises ValueError: Reference, observed masses, tolerance or adducts are invalid.
+
+### `run_info(data, *, keep=True)`
+
+Read diagnostics attached to a returned table.
+
+:param data: DataFrame returned by this library.
+:param keep: Default True; use False in the CLI to remove diagnostics.
+:returns: An independent dictionary describing the run.
+:raises ValueError: The table carries no run_info.
+
+### `mass_error_figure(data)`
+
+Plot the ppm error of matched metabolite candidates.
+
+:param data: Annotation table returned by annotate.
+:returns: A matplotlib Figure.
+:raises KeyError: ppm_error is absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+The default hmdb lookup is a 15-entry demo. Pass reference= with name, neutral_mass, database_id and formula for local real-reference mass matching. No network lookup runs. The CLI has no reference-file flag.
 
 ## Gotchas
 
-- **Database is HARD-CODED 15 metabolites — `--database` is metadata only.** `metabolomics_annotation.py` defines an 15-entry HMDB tuple. The CLI accepts `hmdb` / `kegg` / `lipidmaps` / `metlin` (choices=...) but the value is only logged into `result.json` — the lookup always uses the same 15-entry HMDB list. For real annotation, use SIRIUS / GNPS / MetFrag externally.
-- **`--ppm 10.0` default is m/z-tolerance.** Suitable for high-resolution Orbitrap; for low-resolution Q-TOF use `--ppm 30.0`. The mass-error formula is `|mz_obs - mz_ref| < (ppm × mz_ref / 1e6)`.
-- **`--input` REQUIRED unless `--demo`.** `metabolomics_annotation.py` raises `ValueError("--input required when not using --demo")`.
-- **Required CSV column is `mz`** (lowercase). XCMS exports `mzmed`, MZmine exports `m/z`; rename to `mz` first.
-- **Multiple matches per feature ⇒ multiple rows.** A feature with 3 candidate matches yields 3 rows in `tables/annotations.csv`; deduplicate downstream by `feature_id` if you need 1:1.
+- `annotate` rejects other database labels without reference data. Each query can have multiple candidate rows in `tables/annotations.csv`; Unknown rows retain unmatched queries. Confidence labels describe ppm bins, not identification probability.
 
-## Key CLI
+## Inputs and outputs
+
+CSV input; `tables/annotations.csv`, `report.md` and `result.json`. The CLI writes `reproducibility/commands.sh`.
+The function library returns objects; the CLI and step own file writes.
+
+## CLI
 
 ```bash
-# Demo
-python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py --demo --output /tmp/anno_demo
-
-# Real feature table (annotates against demo HMDB dictionary regardless of --database)
-python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py \
-  --input features.csv --output results/ \
-  --database hmdb --ppm 5.0
+python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py --demo --output /tmp/metabolomics_annotation
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — m/z-match formula, demo-DB caveats
-- `references/output_contract.md` — `tables/annotations.csv` schema
-- Adjacent skills: `metabolomics-xcms-preprocessing` (upstream — feature × sample matrix), `metabolomics-peak-detection` (upstream — per-sample peak picking), `metabolomics-quantification` (parallel — impute + normalise), `metabolomics-pathway-enrichment` (downstream — pathway analysis on annotated features)
+- [Parameters](references/parameters.md)
+- [Methodology](references/methodology.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

@@ -1,37 +1,16 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── tables/
-│   ├── batch_info.csv
-│   ├── batch_metrics.csv
-│   ├── corrected_counts.csv
-│   ├── corrected_expression.csv
-│   └── counts.csv
-└── figures/
-    └── batch_assessment.png
-```
+The CLI owns these files:
 
-## File contents
+- `tables/corrected_expression.csv`
+- `tables/batch_metrics.csv`
+- `figures/pca_before_correction.png`
+- `figures/pca_after_correction.png`
+- `figures/batch_assessment.png`
+- `report.md`, `result.json`
+- `reproducibility/commands.sh`
 
-- `tables/batch_info.csv` — written by `bulkrna_batch_correction.py` (or its imported `_lib/` helpers).
-- `tables/batch_metrics.csv` — written by `bulkrna_batch_correction.py` (or its imported `_lib/` helpers).
-- `tables/corrected_counts.csv` — written by `bulkrna_batch_correction.py` (or its imported `_lib/` helpers).
-- `tables/corrected_expression.csv` — written by `bulkrna_batch_correction.py` (or its imported `_lib/` helpers).
-- `tables/counts.csv` — written by `bulkrna_batch_correction.py` (or its imported `_lib/` helpers).
-- `figures/batch_assessment.png` — written by `bulkrna_batch_correction.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `bulkrna_batch_correction.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-### Demo-only outputs
-
-- `demo_bulkrna_batch_expr.csv` — generated only on `--demo`.
-- `demo_bulkrna_batch_info.csv` — generated only on `--demo`.
-
-## Notes
-
-Auto-generated from `bulkrna_batch_correction.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The function library returns DataFrames and Figures. R matrix exchanges and
+backend CSVs live in temporary directories and are removed after the call.
+Backend diagnostics are available through `run_info` and the CLI's
+`result.json` data section. Reports carry the research-use disclaimer.

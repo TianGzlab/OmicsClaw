@@ -20,7 +20,7 @@ def tmp_output(tmp_path):
 def test_demo_mode(tmp_output):
     """bulkrna-de --demo should run without error."""
     result = subprocess.run(
-        [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--method", "ttest", "--output", str(tmp_output)],
         capture_output=True,
         text=True,
         timeout=120,
@@ -36,7 +36,7 @@ def test_demo_mode(tmp_output):
 def test_demo_report_content(tmp_output):
     """Report should contain expected sections."""
     subprocess.run(
-        [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--method", "ttest", "--output", str(tmp_output)],
         capture_output=True,
         text=True,
         timeout=120,
@@ -50,7 +50,7 @@ def test_demo_report_content(tmp_output):
 def test_demo_result_json(tmp_output):
     """result.json should contain expected keys."""
     subprocess.run(
-        [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--method", "ttest", "--output", str(tmp_output)],
         capture_output=True,
         text=True,
         timeout=120,

@@ -16,62 +16,138 @@ tags:
 
 ## When to use
 
-Run when you have a bulk RNA-seq cohort and a single-cell reference
-with pre-computed pseudotime, and you want each bulk sample placed on
-that pseudotime axis.  The current implementation is a sklearn-based
-NNLS-plus-nearest-neighbour pipeline (PCA → kNN against ref); it does
-*not* use VAE / GNN despite the skill name's connotation.
+Place bulk samples on an observed single-cell pseudotime axis and estimate
+cell-type fractions. Use `bulkrna-deconvolution` for fractions without placement
+and `sc-pseudotime` to infer a trajectory on the reference first.
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('bulkrna-trajblend')
+data, reference, labels, pseudotime = library.demo_data(random_state=42)
+result = library.map_trajectory(data, reference=reference, labels=labels, pseudotime=pseudotime)
+write_output(result, 'tables/pseudotime_estimates.csv')
+```
 
-- File types: `.csv`, `.tsv`, `.h5ad`
+For real files, pass `read_fastq`, `read_log` or `read_reference` as appropriate
+to `read_input(..., reader=...)`. `examples/example_step.py` is executable.
 
-**Outputs**
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_reference(path: str | Path, *, cell_type_key: str='cell_type', pseudotime_key: str='pseudotime') -> tuple`
+
+Read a reference with annotations; pass this function as reader= to read_input.
+
+:param path: H5AD with expression in X, or cell-by-gene CSV/TSV with annotation columns.
+:param cell_type_key: CLI default cell_type; change for a named annotation column.
+:param pseudotime_key: CLI default pseudotime; supply an observed reference trajectory value.
+:returns: Cell-by-gene DataFrame, indexed cell-type Series and indexed pseudotime Series.
+:raises ValueError: Required annotations are missing.
+:raises ImportError: H5AD reading needs anndata; install it with install_skill_deps.
+
+### `map_trajectory(bulk: pd.DataFrame, *, reference: pd.DataFrame, labels: pd.Series, pseudotime: pd.Series, k: int=15, random_state: int=42) -> pd.DataFrame`
+
+Return bulk pseudotime estimates from NNLS and joint PCA/kNN placement.
+
+:param bulk: Sample-by-gene nonnegative expression on a scale comparable with the reference.
+:param reference: Cell-by-gene expression with at least fifty shared genes.
+:param labels: Cell-type labels indexed by reference cell identifiers.
+:param pseudotime: Observed reference pseudotime indexed by cell identifiers; never synthesized.
+:param k: CLI default 15 nearest reference cells; reduce for a smaller reference.
+:param random_state: CLI seed 42 forwarded to PCA; change to assess randomized-solver sensitivity.
+:returns: New sample-indexed pseudotime table; fractions and embeddings remain in attrs.
+:raises ValueError: Matrices, annotations, gene overlap or neighbor count are invalid.
+:raises ImportError: Missing scipy/scikit-learn; use install_skill_deps.
+
+### `fractions(result: pd.DataFrame) -> pd.DataFrame`
+
+Return the estimated cell-type fractions.
+
+:param result: Output of map_trajectory retaining attrs.
+:returns: A separate sample-by-cell-type DataFrame.
+:raises KeyError: Fraction diagnostics are absent.
+
+### `run_info(result: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read placement diagnostics and plot data.
+
+:param result: Output of map_trajectory.
+:param keep: True preserves attrs; False removes diagnostics before serialization.
+:returns: Separate method, seed, fractions, embedding and annotation values.
+:raises TypeError: The result is not a DataFrame.
+
+### `trajectory_figure(result: pd.DataFrame)`
+
+Plot bulk and reference PCA coordinates colored by reference pseudotime.
+
+:param result: Placement result retaining its diagnostic attrs.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: Embedding diagnostics are absent.
+
+### `fractions_figure(result: pd.DataFrame)`
+
+Plot sample-by-cell-type proportions.
+
+:param result: Placement result retaining its diagnostic attrs.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: Fraction diagnostics are absent.
+
+### `demo_data(*, random_state: int=42) -> tuple`
+
+Generate synthetic bulk mixtures and an annotated reference in memory.
+
+:param random_state: CLI seed 42; change for another simulation without global RNG mutation.
+:returns: Bulk table, reference table, cell-type Series and pseudotime Series.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`map_trajectory` takes sample/cell rows and gene columns. NNLS estimates cell-type
+fractions. Joint reference-plus-bulk log1p expression is standardized, projected
+with PCA, and mapped with 15 nearest reference cells. Use comparable expression
+scales; at least 50 shared genes are required. PCA receives `random_state=42`.
+The CLI's `--n-epochs` remains unused; no VAE or GNN is fitted.
+
+## Gotchas
+
+- `read_reference` requires cell_type and pseudotime annotations; it does not fabricate Unknown labels or zero pseudotime.
+- `map_trajectory` aligns both annotation Series by reference cell index.
+- `pseudotime_std` is neighbor spread, not a calibrated confidence interval.
+- `run_info` retains fractions and PCA coordinates in DataFrame attrs; CSV serialization does not preserve them.
+
+## Inputs and outputs
+
+The CLI writes these artifacts; functions return DataFrames and Figures without writing them:
 
 - `tables/cell_fractions.csv`
 - `tables/pseudotime_estimates.csv`
-- `figures/bulk_on_trajectory.png`
 - `figures/fraction_heatmap.png`
+- `figures/bulk_on_trajectory.png`
 - `figures/pseudotime_distribution.png`
 - `figures/trajectory_embedding.png`
 - `report.md`
 - `result.json`
+- `reproducibility/commands.sh`
 
-## Flow
-
-1. Load bulk counts + sc reference.
-2. Find common genes between bulk and reference (`bulkrna_trajblend.py` raises `ValueError` if `< 50` genes overlap).
-3. Run NNLS deconvolution to estimate per-sample cell-type fractions.
-4. Project bulk samples into the reference's PCA space; use `sklearn.neighbors.NearestNeighbors` to find each bulk sample's k nearest reference cells.
-5. Estimate per-sample pseudotime as mean (and std) of the neighbour set's reference pseudotime values.
-6. Render trajectory figures; emit fractions + pseudotime tables.
-
-## Gotchas
-
-- **Gene-namespace mismatch hard-fails at 50.**  `bulkrna_trajblend.py` raises if fewer than 50 gene IDs overlap between bulk and reference.  Most common cause: bulk uses Ensembl IDs while sc reference uses HGNC symbols.  Pre-run `bulkrna-geneid-mapping` to harmonise.
-- **`--n-epochs` is currently a no-op.**  The argparse help text reads `"VAE epochs (unused in fallback)"` — there is no VAE / GNN code path in this version (the script imports only `sklearn`, `numpy`, `pandas`).  The flag is preserved as a forward-compat hook; passing any value has no effect on output.  Do not report results as "VAE+GNN-derived" until that code lands.
-- **Pseudotime placement is a kNN average, not a likelihood-based fit.**  Each bulk sample's `pseudotime` is the *mean* of its k nearest reference cells' pseudotimes — it doesn't carry uncertainty in the way a probabilistic model would.  Use `pseudotime_std` and `mean_neighbor_dist` (per `bulkrna_trajblend.py`) as crude confidence proxies; large neighbour distances mean the bulk sample doesn't cleanly resemble any reference cell.
-- **Reference pseudotime values must be supplied externally.**  This skill consumes pseudotime; it does not compute it.  Run `sc-pseudotime` on the reference first (or use a published pre-pseudotimed reference) so the input AnnData has the relevant `obs` column.
-
-## Key CLI
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-trajblend/bulkrna_trajblend.py --demo --output /tmp/bulkrna-trajblend_demo
-python skills/bulkrna/bulkrna-trajblend/bulkrna_trajblend.py \
-  --input bulk_counts.csv --reference scref.h5ad --output results/
+python skills/bulkrna/bulkrna-trajblend/bulkrna_trajblend.py --demo --output /tmp/bulkrna_trajblend
 ```
+
+For real files use `--input <file>`; trajectory placement also needs `--reference <file>`.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — NNLS deconvolution + kNN pseudotime mapping; the future-training path the `--n-epochs` flag anticipates
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-deconvolution` (parallel: same NNLS proportions, no pseudotime placement), `bulkrna-geneid-mapping` (run upstream to harmonise gene IDs), `sc-pseudotime` (run upstream on the reference to populate the pseudotime column this skill consumes)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`anndata`, `matplotlib`, `numpy`, `pandas`, `scikit-learn`, `scipy`
+`matplotlib`, `numpy`, `pandas`, `anndata`, `scikit-learn`, `scipy`

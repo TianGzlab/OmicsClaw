@@ -57,7 +57,7 @@ def test_the_registry_is_a_literal_equal_to_the_import():
 
 def test_size_keys_and_uniqueness():
     table = deps.DEPENDENCIES
-    assert len(table) == 66
+    assert len(table) == 70
     normalised = [_norm(k) for k in table]
     assert len(set(normalised)) == len(normalised)
     modules = [v["module"] for v in table.values()]
@@ -91,7 +91,7 @@ def test_every_entry_follows_the_field_contract():
 def test_the_special_entries_are_exactly_these():
     table = deps.DEPENDENCIES
     assert {k for k, v in table.items() if v["kind"] == "git"} == {"STAGATE-pyG", "pybanksy", "STalign"}
-    assert {k for k, v in table.items() if v["kind"] == "r"} == {"xcms", "metaboanalyst", "Matrix", "numbat", "CellChat"}
+    assert {k for k, v in table.items() if v["kind"] == "r"} == {"xcms", "metaboanalyst", "Matrix", "numbat", "CellChat", "DESeq2", "sva", "survival", "WGCNA"}
     assert {k for k, v in table.items() if "also" in v} == {"singler"}
     assert table["singler"]["also"] == ["singlecellexperiment"]
     assert {k for k, v in table.items() if "alt_env" in v} == {"pybanksy"}

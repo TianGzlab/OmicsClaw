@@ -1,15 +1,6 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+Run `python skills/metabolomics/metabolomics-statistics/metabolomics_statistics.py --help` for CLI flags.
+The generated API section in [SKILL.md](../SKILL.md) defines function defaults.
 
-- `--alpha`
-- `--group1-prefix`
-- `--group2-prefix`
-- `--method`
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+The wilcoxon label calls scipy.stats.ranksums, not paired Wilcoxon or Mann-Whitney U. ANOVA and Kruskal accept exactly two groups here. BH FDR covers every returned feature.

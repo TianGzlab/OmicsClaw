@@ -16,69 +16,84 @@ tags:
 
 ## When to use
 
-The user has a feature × sample intensity matrix (output of
-`metabolomics-xcms-preprocessing` or any feature-level table)
-and wants per-sample peaks detected via `scipy.signal.find_peaks`
-with configurable prominence / height / distance. Sample columns
-are auto-detected by name (`sample*` or `*intensity*`); override
-with `--sample-prefix <prefix>`.
+Detect peaks on tabular sample signals ordered by retention time. This is not raw mzML peak extraction; run XCMS externally for that workflow.
 
-For raw LC-MS preprocessing use `metabolomics-xcms-preprocessing`.
-For normalisation use `metabolomics-normalization`.
+## Use from a step
 
-## Inputs & Outputs
+```python
+import pandas as pd
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("metabolomics-peak-detection")
+data = read_input('features.csv', reader=pd.read_csv)
+result = library.detect_peaks(data)
+write_output(result, 'tables/result.csv')
+```
 
-**Inputs**
+[examples/example_step.py](examples/example_step.py) runs a seeded synthetic
+example through the step runner and writes a table and Figure. Computations
+return new DataFrames, leave the input unchanged and expose diagnostics through
+`run_info(result)`. Plotting functions write no files.
 
-- File types: `.csv`
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/detected_peaks.csv`
-- `report.md`
-- `result.json`
+### `detect_peaks(data, *, sample_cols=None, prominence=10000.0, height=None, distance=5)`
 
-## Flow
+Detect per-sample peaks after sorting rows by retention time.
 
-1. Load CSV (`--input <feature_intensity.csv>`) or generate a demo at `output_dir/*.csv` (`peak_detect.py`).
-2. Auto-detect sample columns: if `--sample-prefix` is set, use `c.startswith(prefix)` (`peak_detect.py`); else fall back to `"intensity" in c.lower() or c.lower().startswith("sample")`.
-3. Per sample column, run `scipy.signal.find_peaks` with `prominence=`, `height=`, `distance=`.
-4. Write `tables/detected_peaks.csv` (`peak_detect.py`) + `report.md` + `result.json`.
+:param data: DataFrame with mz, rt and numeric sample intensities.
+:param sample_cols: Explicit columns; None uses the CLI intensity/sample name detection.
+:param prominence: CLI default 10000; adjust to the intensity scale.
+:param height: CLI default None; optionally require a minimum peak height.
+:param distance: CLI default 5; minimum separation in sorted row positions, not seconds.
+:returns: A new peak DataFrame with diagnostics in attrs['run_info'].
+:raises ValueError: No sample columns match or peak parameters are invalid.
+
+### `run_info(data, *, keep=True)`
+
+Read diagnostics attached to a returned table.
+
+:param data: DataFrame returned by this library.
+:param keep: Default True; use False in the CLI to remove diagnostics.
+:returns: An independent dictionary describing the run.
+:raises ValueError: The table carries no run_info.
+
+### `peaks_figure(data)`
+
+Plot detected peak intensity against retention time.
+
+:param data: Peak table returned by detect_peaks.
+:returns: A matplotlib Figure.
+:raises KeyError: Required peak columns are absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+scipy.signal.find_peaks uses prominence, optional height and a row-index distance after sorting by rt. Widths are measured at half prominence in row-index units.
 
 ## Gotchas
 
-- **Sample-column auto-detection is CASE-INSENSITIVE substring match.** `peak_detect.py` uses `"intensity" in c.lower() or c.lower().startswith("sample")`. Columns like `Intensity_1`, `sample_a`, `SAMPLE.5` all match; columns like `signal_1` or `abundance` do NOT — pre-rename or use `--sample-prefix signal`.
-- **No sample columns ⇒ `ValueError`.** `peak_detect.py` raises `ValueError("...")` when neither auto-detection nor `--sample-prefix` matches any column.
-- **`--input` REQUIRED unless `--demo`.** `peak_detect.py` raises `ValueError("--input required when not using --demo")`.
-- **`--prominence` default 1e4 is intensity-unit-dependent.** Suitable for raw counts at 1e4-1e6 magnitude; for log-transformed data, set `--prominence 0.5` or smaller. Wrong threshold silently yields zero peaks.
-- **`--distance` is in INDEX UNITS (sample order), not seconds.** `peak_detect.py` notes `default=5` — meaning at-least-5-row separation between adjacent peaks. If your features are RT-sorted, this corresponds to ~5 RT bins; if shuffled, the constraint is meaningless.
-- **NaN values are silently treated as 0 by `find_peaks`.** Pre-impute or filter NaN rows if they affect detection.
+- `detect_peaks` expects mz and rt plus sample/intensity columns. `distance` and `width` are row positions, not seconds. NaNs follow scipy signal semantics and are not imputed. Empty outputs keep their CSV column schema.
 
-## Key CLI
+## Inputs and outputs
+
+CSV input; `tables/detected_peaks.csv`, `report.md` and `result.json`. Demo mode also writes its synthetic input CSV at the output root.
+The function library returns objects; the CLI and step own file writes.
+
+## CLI
 
 ```bash
-# Demo
-python skills/metabolomics/metabolomics-peak-detection/peak_detect.py --demo --output /tmp/peak_demo
-
-# Real intensity matrix (auto-detect sample columns)
-python skills/metabolomics/metabolomics-peak-detection/peak_detect.py \
-  --input feature_intensities.csv --output results/ \
-  --prominence 1e5 --distance 3
-
-# Custom sample-column prefix
-python skills/metabolomics/metabolomics-peak-detection/peak_detect.py \
-  --input my_table.csv --output results/ --sample-prefix replicate_
+python skills/metabolomics/metabolomics-peak-detection/peak_detect.py --demo --output /tmp/metabolomics_peak_detection
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — `scipy.signal.find_peaks` semantics, prominence vs height
-- `references/output_contract.md` — `tables/detected_peaks.csv` schema
-- Adjacent skills: `metabolomics-xcms-preprocessing` (upstream — converts raw LC-MS to feature × sample matrix), `metabolomics-quantification` (parallel — impute + normalise), `metabolomics-annotation` (downstream — annotate features against databases), `metabolomics-normalization` (downstream — log / median / quantile)
+- [Parameters](references/parameters.md)
+- [Methodology](references/methodology.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`, `scipy`
+`numpy`, `pandas`, `scipy`, `matplotlib`

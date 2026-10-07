@@ -1,8 +1,6 @@
 ---
 name: bulkrna-batch-correction
-description: Load when removing batch effects from a multi-cohort bulk RNA-seq dataset using ComBat (R
-  or Python implementation). Skip when there is only one batch; single-cell batch integration (use sc-batch-integration);
-  spatial multi-slice integration (use spatial-integrate).
+description: Load when correcting batch effects in bulk expression using R sva ComBat or the legacy Python parametric approximation. Skip single-batch inputs; use sc-batch-integration for single-cell data or spatial-integrate for spatial slices.
 trigger: batch correction, ComBat, batch effect, harmonize, multi-cohort, batch removal
 tags:
 - bulkrna
@@ -16,63 +14,102 @@ tags:
 
 ## When to use
 
-Run when bulkrna-qc PCA or sample-correlation heatmap reveals samples
-clustering by batch (cohort, sequencing run, library prep date) rather
-than by biology.  Applies ComBat — preferring the R `sva` implementation
-when available, falling back to a Python port.
+Load when correcting batch effects in bulk expression using R sva ComBat or the legacy Python parametric approximation. Skip single-batch inputs; use sc-batch-integration for single-cell data or spatial-integrate for spatial slices.
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill("bulkrna-batch-correction")
+result = library.correct(data, batches=batches, backend="python")
+write_output(result, "tables/result.csv")
+write_output(library.pca_figure(result, batches=batches), "figures/result.png")
+```
 
-- File types: `.csv`
+Read expression and metadata with `read_input` before calling the library.
+`examples/example_step.py` constructs a small synthetic dataset and checks
+its results through the step runner and fresh-kernel replay.
 
-**Outputs**
+## API
 
-- `tables/batch_info.csv`
-- `tables/batch_metrics.csv`
-- `tables/corrected_counts.csv`
-- `tables/corrected_expression.csv`
-- `tables/counts.csv`
-- `figures/batch_assessment.png`
-- `report.md`
-- `result.json`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-## Flow
+### `correct(data: pd.DataFrame, *, batches: pd.DataFrame, mode: str='parametric', backend: str='auto') -> pd.DataFrame`
 
-1. Load expression matrix + batch metadata.
-2. Try R `sva::ComBat` first; on import failure, fall back to Python ComBat (`bulkrna_batch_correction.py` warns "R ComBat not available (...); using Python fallback.").
-3. The Python fallback short-circuits with a warning ("Only 1 batch detected; returning data unchanged.") when `--batch-info` describes a single batch.  The R path has no equivalent guard.
-4. Render before/after PCA; emit corrected table, batch-metrics table, and report.
+Return corrected expression, leaving the input unchanged.
+
+:param data: Finite nonnegative expression, features by samples; correction uses this scale directly.
+:param batches: Metadata with sample and batch columns, and optional biological condition.
+:param mode: CLI default parametric, or non-parametric (requires R sva).
+:param backend: auto prefers R as the CLI did; r requires R, python uses the legacy parametric approximation.
+:returns: Corrected DataFrame with run_info diagnostics; values can be negative.
+:raises ValueError: Data, metadata, mode or backend is invalid.
+:raises ImportError: An explicitly requested R backend is unavailable.
+:raises RuntimeError: R fails and the requested mode/design has no Python fallback.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return backend diagnostics and before/after batch metrics.
+
+:param data: Result of correct.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Diagnostics dictionary.
+:raises ValueError: No correction diagnostics are attached.
+
+### `pca_figure(data: pd.DataFrame, *, batches: pd.DataFrame)`
+
+Plot PCA after signed log2(1+abs(x)), accepting negative corrections.
+
+:param data: Original or corrected feature-by-sample expression.
+:param batches: Metadata containing sample and batch.
+:returns: Matplotlib Figure.
+:raises ValueError: Samples lack batch metadata.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+The function library returns DataFrames and Figures. The CLI loads the
+same library and owns reports and file writes. R runs in a temporary
+directory using Matrix Market, feature/sample identifiers and metadata.
+No R intermediate is a permanent CLI output.
 
 ## Gotchas
 
-- **Single-batch input is a silent no-op (Python fallback only).**  `bulkrna_batch_correction.py` returns the input unchanged with a warning when only one batch is detected — but **only when the Python ComBat path runs**.  The R `sva::ComBat` path does not have this guard, so a single-batch run on an R-equipped system may proceed with nonsense output.  Verify `result.json["n_batches"]` ≥ 2 before trusting downstream results.
-- **R vs Python ComBat give numerically different results.**  The silent fallback to the Python port can produce per-gene corrected values that differ at the 3rd decimal from R `sva` — usually inconsequential for downstream DE but visible in direct value comparisons.  The chosen backend is not recorded in the summary dict; only the warning log distinguishes them.
-- **ComBat assumes the biological design is balanced across batches.**  If condition X is only in batch 1 and condition Y is only in batch 2, ComBat will remove the biology along with the batch effect.  No automatic check — sanity-cross-tabulate `condition × batch` before running, and consider including condition as a covariate in a more sophisticated tool (limma::removeBatchEffect) if confounded.
-- **Negative output values are normal for ComBat-on-counts.**  ComBat operates in log-space and returns gene-by-sample matrices that can contain negative values after back-transform.  Do NOT pipe `corrected_expression.csv` into `bulkrna-de` (which expects non-negative integer counts) — use the corrected matrix only for visualisation, clustering, or co-expression analysis.
-- **Silhouette score interpretation is direction-of-improvement, not absolute.**  `silhouette_before` / `silhouette_after` (in `result.json` and `batch_metrics.csv`) measure batch clustering tightness.  A drop indicates batch effect has been reduced; absolute values depend on how separable the batches were originally.
+- `correct(backend="auto")` prefers R sva and warns/records any Python fallback. `backend="r"` requires R. The Python method is the legacy parametric approximation, not numerical equivalence to sva.
+- `correct` requires at least two batches and two samples per batch. Missing labels and single-batch inputs raise before any backend runs.
+- `correct` applies ComBat directly to the supplied scale, not to an automatic log transform. Outputs may be negative and are not integer counts for DESeq2.
+- `correct(mode="non-parametric")` and condition covariates require R; Python cannot silently substitute a different design or mode.
+- `run_info()["summary"]` contains before/after PCA silhouette metrics using signed log2(1+abs(x)), so negative corrections remain finite. Inspect condition-by-batch balance before removing effects.
 
-## Key CLI
+## Inputs and outputs
+
+Expression CSV with feature identifiers in the first column; metadata CSV with sample and batch, plus optional condition.
+
+CLI outputs:
+
+- `tables/corrected_expression.csv`
+- `tables/batch_metrics.csv`
+- `figures/pca_before_correction.png`
+- `figures/pca_after_correction.png`
+- `figures/batch_assessment.png`
+- `report.md`, `result.json`
+- `reproducibility/commands.sh`
+
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-batch-correction/bulkrna_batch_correction.py --demo --output /tmp/bulkrna-batch-correction_demo
-python skills/bulkrna/bulkrna-batch-correction/bulkrna_batch_correction.py \
-  --input counts.csv --batch-info batches.csv --output results/
-python skills/bulkrna/bulkrna-batch-correction/bulkrna_batch_correction.py \
-  --input counts.csv --batch-info batches.csv --output results/ \
-  --mode non-parametric
+python skills/bulkrna/bulkrna-batch-correction/bulkrna_batch_correction.py --demo --output /tmp/bulkrna_batch_correction_demo
 ```
+
+Run the script with `--help` for real-input arguments.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — parametric vs non-parametric ComBat, R↔Python differences, design-confound caveats
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-qc` (run upstream to spot batch effects), `bulkrna-coexpression` / `bulkrna-survival` (downstream — corrected matrix safe for these), `bulkrna-de` (NOT downstream-safe — DE always wants raw counts), `sc-batch-integration` (single-cell sibling: Harmony/scVI/etc.)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`matplotlib`, `numpy`, `pandas`, `scipy`
+`matplotlib`, `numpy`, `pandas`, `scipy`, `sva`, `Matrix`

@@ -18,65 +18,111 @@ tags:
 
 ## When to use
 
-The user has a peptide-level CSV (from MaxQuant `peptides.txt`,
-FragPipe `combined_peptide.tsv`, DIA-NN, or any peptide table with
-columns including `peptide` / `protein` / optionally `score` /
-`charge`) and wants identification summary statistics: total PSM
-count, unique peptide count, distinct protein count, optional
-median score, optional charge distribution.
+Confidence filtering uses qvalue, q-value, q_value, PEP, pep or fdr in that order. The default threshold is 0.01.
+Use existing search-engine tables; this skill does not search raw spectra.
 
-This skill does NOT run a search engine — it summarises a peptide
-table that already exists. The `--fdr` flag is recorded as
-metadata only (no FDR re-thresholding is performed).
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('proteomics-identification')
+data = library.demo_data(random_state=42)
+result = library.filter_identifications(data, n_spectra=1000)
+write_output(result, 'tables/peptides.csv')
+```
 
-**Inputs**
+For real data, use `read_input` and pass any `read_table` helper as `reader=`.
+The executable `examples/example_step.py` also checks the result and writes a Figure.
 
-- File types: `.csv`, `.tsv`, `.txt`
+## API
 
-**Outputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- `tables/peptides.csv`
-- `report.md`
-- `result.json`
-- Produces artifact `proteomics.peptide_table` as `tables/peptides.csv` (`csv`)
+### `read_table(path: str | Path) -> pd.DataFrame`
 
-## Flow
+Read peptide CSV/TSV; pass this function as reader= to read_input.
 
-1. Load CSV (`--input <peptides.csv>`) or generate a demo peptide table (`--demo`).
-2. Filter by FDR via `filter_by_fdr` (`proteomics_identification.py`) — searches columns in order `qvalue` → `q-value` → `q_value` → `PEP` → `pep` → `fdr`; if NONE found, logs a warning and passes through unchanged.
-3. Compute n_psms, n_unique_peptides, n_proteins, id_rate; optionally median `score` (`proteomics_identification.py`) and `charge` distribution.
-4. Write `tables/peptides.csv` (`proteomics_identification.py`) + `report.md` + `result.json`.
+:param path: Peptide table; txt and tsv suffixes select tab separation.
+:returns: Table with common MaxQuant column names normalized.
+:raises OSError: The file cannot be read.
+
+### `filter_identifications(data: pd.DataFrame, *, fdr_threshold: float=0.01, n_spectra: int | None=None) -> pd.DataFrame`
+
+Filter peptide confidence values and return a new table.
+
+:param data: Existing peptide/protein rows with optional qvalue, q-value, q_value, PEP, pep or fdr.
+:param fdr_threshold: CLI default 0.01; PEP thresholding is not a global FDR estimate.
+:param n_spectra: Total spectra; CLI default None uses retained PSM count, not an observed identification rate.
+:returns: Filtered rows with the actual confidence column and summary in attrs.
+:raises ValueError: Threshold or spectrum count is invalid.
+
+### `run_info(table: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read identification diagnostics.
+
+:param table: Filtered peptide table.
+:param keep: True preserves attrs; False removes diagnostics.
+:returns: A separate dictionary with filter provenance and summary.
+:raises TypeError: The input is not a DataFrame.
+
+### `score_figure(table: pd.DataFrame)`
+
+Plot peptide identification scores.
+
+:param table: Peptide table including score.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: score is absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Simulate identifications for one thousand spectra.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: Synthetic peptide identifications, not a search-engine result.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Confidence filtering uses qvalue, q-value, q_value, PEP, pep or fdr in that order. The default threshold is 0.01.
+Functions return new DataFrames. `run_info(result)` reads diagnostic attrs;
+use `keep=False` before serialization when those attrs are not needed.
 
 ## Gotchas
 
-- **No search engine is invoked.** This skill summarises an existing peptide CSV — it does NOT run MaxQuant / MS-GF+ / Comet / Mascot. Run a search engine upstream and feed the peptide-level CSV here.
-- **`--fdr` ACTIVELY filters when an FDR column is present.** `proteomics_identification.py` calls `filter_by_fdr(peptides, fdr_threshold=args.fdr)`. The helper tries columns in order `qvalue` → `q-value` → `q_value` → `PEP` → `pep` → `fdr`. With NONE present, the run only logs a warning and passes the input through unchanged.
-- **`--input` REQUIRED unless `--demo`.** `proteomics_identification.py` raises `ValueError("--input required when not using --demo")`.
-- **Optional columns are silently skipped when absent.** A CSV without `score` omits `summary["median_score"]`; without `charge` omits `summary["charge_distribution"]`. Inspect the JSON before writing downstream consumers that assume those keys exist.
-- **Column names must match exactly (lowercase): `peptide`, `protein`, `score`, `charge`.** MaxQuant `evidence.txt` ships with `Sequence` / `Proteins` / `Score` / `Charge` — rename to lowercase first (e.g. `df.rename(columns={"Sequence": "peptide", "Proteins": "protein", "Score": "score", "Charge": "charge"})`).
+- filter_identifications warns and records an unfiltered result without confidence columns. PEP thresholding is not global FDR control. run_info marks inferred spectrum totals.
+- `demo_data` uses seed 42, matching the CLI; every demo is synthetic.
+- `run_info` lives in DataFrame attrs and is not preserved by CSV serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI reads CSV tables and writes:
+
+- tables/peptides.csv
+- report.md
+- result.json
+- `reproducibility/commands.sh` records the CLI invocation template.
+
+Functions return data and Figures without writing files. Steps own their outputs.
+Demo mode also writes its synthetic input when the original CLI used a file.
+
+## CLI
 
 ```bash
-# Demo
-python skills/proteomics/proteomics-identification/proteomics_identification.py --demo --output /tmp/id_demo
-
-# Real peptide CSV
-python skills/proteomics/proteomics-identification/proteomics_identification.py \
-  --input peptides.csv --output results/ --fdr 0.01
+python skills/proteomics/proteomics-identification/proteomics_identification.py --demo --output /tmp/proteomics_identification
 ```
+
+For real input replace `--demo` with `--input <table>`.
+
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — PSM / peptide / protein semantics, FDR conventions
-- `references/output_contract.md` — `tables/peptides.csv` schema
-- Adjacent skills: `proteomics-data-import` (upstream — protein-level table normalisation), `proteomics-ms-qc` (parallel — protein-table QC), `proteomics-quantification` (downstream — LFQ / iBAQ / spectral count), `proteomics-de` (downstream — differential abundance)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
+- `proteomics-data-import` for protein-table normalization; `proteomics-de` for comparisons.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

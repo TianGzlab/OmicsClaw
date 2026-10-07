@@ -20,8 +20,8 @@ Mass spec proteomics: raw MS QC, peptide/protein ID, LFQ/TMT/DIA quantification,
   triggers: data import, convert proteomics, format conversion
 - `proteomics-de` — Load when computing two-group differential protein abundance (group2 vs group1, log2FC + p-value + BH-adjusted FDR) via Welch t-test, equal-variance t-test, or Mann-Whitney on a wide protein × sample CSV. Skip when you need multi-condition DE (run pairwise contrasts manually); label-based TMT linear-mixed models.
   triggers: differential abundance, protein expression, MSstats, limma, volcano
-- `proteomics-enrichment` — Load when running over-representation analysis (ORA) on a list of proteins via Fisher's exact test against a built-in 8-pathway DEMO dictionary, with BH-FDR correction. Skip when needing a real pathway database (this skill is demo-only) (use bulkrna-enrichment); rank-based GSEA.
-  triggers: proteomics enrichment, pathway analysis, STRING, DAVID, g:Profiler, GO enrichment
+- `proteomics-enrichment` — Load for Fisher over-representation analysis of protein identifiers against caller-supplied pathways. Skip rank-based GSEA (use bulkrna-enrichment) or protein differential testing (use proteomics-de).
+  triggers: proteomics enrichment, pathway analysis, ORA
 - `proteomics-identification` — Load when summarising peptide identifications (PSM count, unique peptide count, distinct protein count, score / charge distributions) from a peptide-level CSV produced by MaxQuant / FragPipe / DIA-NN. Skip when raw spectra are the input (run a search engine first); working with protein-quantification tables (use proteomics-ms-qc).
   triggers: peptide identification, database search, MaxQuant, MS-GF+, Comet, Mascot
 - `proteomics-ms-qc` — Load when computing protein-table QC — proteins × samples count, missing-value rate, intensity CV (median + mean) — from a MaxQuant / FragPipe / DIA-NN protein-quantification CSV. Skip when raw mzML / RAW spectra are the input (run a search engine first); peptide-level QC is needed (use proteomics-identification).

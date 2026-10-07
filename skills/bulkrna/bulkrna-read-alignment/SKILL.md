@@ -18,56 +18,134 @@ tags:
 
 ## When to use
 
-Run after the aligner / quantifier finishes, on the log file produced by
-STAR (`Log.final.out`), HISAT2 (`.log`), or Salmon (`meta_info.json`).
-Yields a one-page mapping-rate summary, strandedness inference, and a
-gene-body coverage profile — the QC bridge between raw FASTQ and the
-count matrix.
+Summarize existing STAR, paired-end HISAT2 or Salmon logs. This does not run
+an aligner. Use `bulkrna-read-qc` for FASTQ and `bulkrna-qc` for counts.
 
-## Inputs & Outputs
+## Use from a step
 
-**Inputs**
+```python
+from skills._sdk.notebook import load_skill, write_output
+library = load_skill('bulkrna-read-alignment')
+data = library.demo_data(random_state=42)
+result = library.summarize(data)
+write_output(result, 'tables/alignment_stats.csv')
+```
 
-- File types: `.out`, `.log`, `.json`
+For real files, pass `read_fastq`, `read_log` or `read_reference` as appropriate
+to `read_input(..., reader=...)`. `examples/example_step.py` is executable.
 
-**Outputs**
+## API
 
-- `tables/alignment_stats.csv`
-- `figures/alignment_composition.png`
-- `figures/gene_body_coverage.png`
-- `figures/mapping_summary.png`
-- `report.md`
-- `result.json`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-## Flow
+### `read_log(path: str | Path) -> str`
 
-1. Auto-detect aligner from filename (`bulkrna_read_alignment.py`): `log.final.out` → STAR; `meta_info` → Salmon; otherwise → HISAT2.
-2. Parse the log into a numeric stats dict.
-3. Run quality assessment heuristics (high/medium/low mapping-rate buckets).
-4. Render figures and write `report.md` + `tables/alignment_stats.csv`.
+Read log text; pass this function as reader= to read_input.
+
+:param path: STAR, HISAT2 or Salmon text/JSON log.
+:returns: File contents without interpreting its filename.
+:raises OSError: The file cannot be read.
+
+### `summarize(data: str | pd.DataFrame, *, method: str='star') -> pd.DataFrame`
+
+Parse alignment counts and return a new mapping summary.
+
+:param data: Log text or a one-row parsed table, including demo_data output.
+:param method: CLI default star; select hisat2 for paired-end summaries or salmon for meta_info JSON.
+:returns: Mapping counts/rates with quality heuristics in run_info; Salmon reports total mapped, not unique mapped.
+:raises ValueError: Required counts are missing, inconsistent or the method is unsupported.
+
+### `run_info(result: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Read mapping assessment and unavailable-evidence diagnostics.
+
+:param result: Output of summarize.
+:param keep: True preserves attrs; False removes diagnostics before serialization.
+:returns: A separate quality/provenance dictionary.
+:raises TypeError: The result is not a DataFrame.
+
+### `mapping_figure(result: pd.DataFrame)`
+
+Plot observed mapping counts as percentages.
+
+:param result: Output of summarize.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: Mapping counts are absent.
+
+### `composition_figure(result: pd.DataFrame)`
+
+Plot observed mapping composition.
+
+:param result: Output of summarize.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: Mapping counts are absent.
+
+### `coverage_figure(coverage: pd.DataFrame)`
+
+Plot an explicitly supplied gene-body coverage profile.
+
+:param coverage: position and coverage columns; alignment logs cannot supply these observations.
+:returns: A matplotlib Figure without synthesizing missing measurements.
+:raises KeyError: Coverage columns are absent.
+
+### `demo_data(*, random_state: int=42) -> pd.DataFrame`
+
+Generate the synthetic STAR summary used by the CLI demo.
+
+:param random_state: CLI seed 42; change for another simulation.
+:returns: One simulated alignment summary row.
+:raises ValueError: The seed is invalid.
+
+### `demo_coverage(*, random_state: int=42) -> pd.DataFrame`
+
+Generate an illustrative coverage profile, not inferred from an alignment log.
+
+:param random_state: CLI demo seed 42; change for another simulation.
+:returns: One hundred simulated percentile/coverage rows.
+:raises ValueError: The seed is invalid.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`summarize` defaults to STAR, matching the CLI. Choose `hisat2` or `salmon`
+explicitly; filenames do not override that choice. STAR/HISAT2 include unique
+and multimapped counts. Salmon meta_info reports total mapped counts only.
 
 ## Gotchas
 
-- **Aligner detection is filename-based, not content-based.**  `bulkrna_read_alignment.py` dispatches by `input_path.name.lower()` — anything that is neither `log.final.out` nor `meta_info` (case-insensitive substring) is silently parsed as a HISAT2 log.  A renamed STAR log will produce nonsense.  Pass `--method star` explicitly if your STAR file isn't named conventionally.
-- **The skill consumes the LOG, not the BAM.**  Feeding a `.bam` or `.sam` file as `--input` will not raise — the parser just finds zero matchable lines and reports an empty stats dict.  Sanity-check `result.json["summary"]["total_reads"]` is non-zero before trusting any downstream summary.
-- **Gene body coverage is synthetic in `--demo` mode** (`bulkrna_read_alignment.py`).  The 5'→3' bias profile in demo runs is a fixed reproducible curve, not derived from real input — useful for layout previews but not for assessing real RNA degradation.
+- `summarize` rejects absent or inconsistent read counts.
+- `run_info` states that logs provide neither gene-body coverage nor inferred strandedness.
+- `coverage_figure` needs an explicit measured profile. `demo_coverage` is synthetic and is only used by `--demo`.
+- `mapped_rate` for Salmon does not mean uniquely mapped rate.
+- HISAT2 `unmapped` is the residual after concordant pairs and includes discordant/unpaired mappings; `run_info` records this limitation.
 
-## Key CLI
+## Inputs and outputs
+
+The CLI writes these artifacts; functions return DataFrames and Figures without writing them:
+
+- `tables/alignment_stats.csv`
+- `figures/mapping_summary.png`
+- `figures/alignment_composition.png`
+- `figures/gene_body_coverage.png (demo only)`
+- `report.md`
+- `result.json`
+- `reproducibility/commands.sh`
+
+## CLI
 
 ```bash
-python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --demo --output /tmp/bulkrna-read-alignment_demo
-python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --input Log.final.out --output results/
+python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --demo --output /tmp/bulkrna_read_alignment
 ```
+
+For real files use `--input <file>`; trajectory placement also needs `--reference <file>`.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag and tuning hint
-- `references/methodology.md` — STAR / HISAT2 / Salmon parsers, strandedness inference
-- `references/output_contract.md` — exact output directory layout
-- Adjacent skills: `bulkrna-read-qc` (upstream FASTQ QC), `bulkrna-qc` (downstream count-matrix QC), `genomics-alignment` (DNA-alignment sibling: BAM/SAM, not log files)
+- `references/methodology.md`
+- `references/parameters.md`
+- `references/output_contract.md`
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `matplotlib`, `numpy`, `pandas`

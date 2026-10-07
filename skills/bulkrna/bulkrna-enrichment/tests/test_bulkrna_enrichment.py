@@ -119,42 +119,11 @@ def test_custom_gene_sets_do_not_silently_use_r_databases(monkeypatch):
     assert result["query_genes_in_background"] == 2
 
 
-def test_ora_r_fallback_preserves_ora_semantics(monkeypatch):
-    spec = importlib.util.spec_from_file_location("bulkrna_enrichment_r_test", SKILL_SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    fake_result = pd.DataFrame(
-        {
-            "Term": ["HALLMARK_TEST"],
-            "Adjusted P-value": [0.01],
-            "P-value": [0.001],
-            "Genes": ["A;B"],
-            "Overlap": ["2/3"],
-        }
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "gseapy",
-        SimpleNamespace(
-            enrichr=lambda **_kwargs: SimpleNamespace(results=fake_result),
-        ),
-    )
-    de_df = pd.DataFrame(
-        {
-            "gene": ["A", "B", "C"],
-            "log2FoldChange": [2.0, 2.0, 0.0],
-            "pvalue": [0.001, 0.001, 1.0],
-            "padj": [0.01, 0.01, 1.0],
-        }
-    )
-
-    result = module.core_analysis(
-        de_df,
-        method="ora_r",
-        gene_sets={"HALLMARK_TEST": ["A", "B", "D"]},
-    )
-    assert result["method_used"] == "ora_gseapy"
+def test_ora_r_does_not_silently_claim_an_unimplemented_backend():
+    from skills._sdk.notebook import load_skill
+    data = pd.DataFrame({'gene': ['A'], 'log2FoldChange': [2.], 'pvalue': [.001], 'padj': [.01]})
+    with pytest.raises(ValueError, match='not implemented'):
+        load_skill('bulkrna-enrichment').enrich(data, method='ora_r', gene_sets={'pathway': ['A']})
 
 
 def test_report_sorts_terms_by_fdr_and_does_not_duplicate_overlap(tmp_path):

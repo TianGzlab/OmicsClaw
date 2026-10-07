@@ -1,20 +1,8 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-└── tables/
-    └── detected_peaks.csv
-```
+`tables/detected_peaks.csv`, `report.md` and `result.json`. Demo mode also writes its synthetic input CSV at the output root.
 
-## File contents
+The function library returns tables and Figures without file writes.
+`run_info` reads DataFrame diagnostics; `keep=False` removes them.
 
-- `tables/detected_peaks.csv` — per-(sample, feature) peak with columns `sample`, `feature_id`, `prominence`, `width`. Written at `peak_detect.py:306`.
-- `report.md` — Markdown summary with detection parameters and per-sample peak counts.
-- `result.json` — `summary` includes `n_samples`, `mean_prominence`, plus the `--prominence` / `--height` / `--distance` / `--sample-prefix` settings.
-
-## Notes
-
-- No `figures/` directory.
-- Peak detection runs per sample column independently (`scipy.signal.find_peaks`).
+`detect_peaks` expects mz and rt plus sample/intensity columns. `distance` and `width` are row positions, not seconds. NaNs follow scipy signal semantics and are not imputed. Empty outputs keep their CSV column schema.

@@ -1,14 +1,6 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+The public defaults and argument meanings are in the generated API section
+of `../SKILL.md`. Run the documented CLI with `--help` for file and report options.
 
-- `--alpha`
-- `--log2fc-threshold`
-- `--method`
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+ttest is the CLI default; welch and mann_whitney are alternatives. Groups default to the first and second half of columns.

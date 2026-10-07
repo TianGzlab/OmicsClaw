@@ -1,12 +1,8 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+`read_fastq` reads the leading 100000 records by default and accepts `.gz`.
+`quality_control` computes per-base quality, Q20/Q30, GC, lengths and adapter
+motif hits from sequence/quality strings. It does not trim reads.
 
-_No extra flags beyond the standard `--input` / `--output` / `--demo` set._
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+The generated API section in `../SKILL.md` lists arguments and defaults.
+The CLI `--help` lists file and report options.

@@ -12,18 +12,18 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.cli_subprocess
+
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "bulkrna_coexpression.py"
 
 
 def _r_wgcna_available() -> bool:
     """Check if R and WGCNA package are available."""
     try:
-        result = subprocess.run(
-            ["Rscript", "-e", "cat(requireNamespace('WGCNA', quietly=TRUE))"],
-            capture_output=True, text=True, timeout=30,
-        )
-        return result.returncode == 0 and "TRUE" in result.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        from skills._sdk.deps import validate_r_environment
+        validate_r_environment(required_r_packages=["WGCNA", "Matrix"])
+        return True
+    except (RuntimeError, ImportError, FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
 

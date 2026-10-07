@@ -19,65 +19,108 @@ tags:
 
 ## When to use
 
-The user has a FASTA from any de novo assembler (SPAdes, Megahit,
-Flye, Canu, etc.) and wants standard QUAST-compatible quality
-metrics: contig count, N50 / N90, L50 / L90, total length, longest
-contig, GC content, optional completeness fraction (when
-`--genome-size` is provided).
+Load this skill for the file-based analysis named in the description.
+The function library and CLI share the same calculations; no external
+aligner, assembler, caller or annotation service is started.
 
-This skill does NOT run the assembly. It consumes the FASTA the
-assembler emits.
+## Use from a step
 
-## Inputs & Outputs
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("genomics-assembly")
+data = read_input("input.fasta", reader=library.read_records)
+result = library.analyze(data)
+write_output(result, "tables/result.csv")
+write_output(library.distribution_figure(result), "figures/distribution.png")
+```
 
-**Inputs**
+Run `examples/example_step.py` through the step runner for a small,
+hand-worked synthetic fixture. It asserts known summary values.
+The reader materializes the input in memory; use bounded FASTQ reads or
+pre-filter large genomic files before loading them.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `read_records(path: str | Path) -> pd.DataFrame`
+
+Read records through read_input(path, reader=library.read_records).
+
+:param path: Existing input file in the format documented under Inputs and outputs.
+:returns: Parsed records as a DataFrame.
+:raises ValueError: Input values or file structure cannot be parsed.
+
+### `analyze(data: pd.DataFrame, *, genome_size: int=0) -> pd.DataFrame`
+
+Compute assembly summaries and return a new table, leaving data unchanged.
+
+:param data: Records containing contig, sequence.
+:param genome_size: CLI default 0 omits completeness; otherwise expected genome bases.
+:returns: Result table with diagnostics and summary in attrs['run_info'].
+:raises ValueError: Required columns are absent or records are empty or invalid.
+
+### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
+
+Return the analysis diagnostics and summary.
+
+:param data: Result returned by analyze.
+:param keep: Keep diagnostics by default; the CLI passes False.
+:returns: Independent diagnostics dictionary.
+:raises ValueError: analyze has not populated diagnostics.
+
+### `distribution_figure(data: pd.DataFrame)`
+
+Plot length values without writing files.
+
+:param data: Result table containing length.
+:returns: Matplotlib Figure.
+:raises ValueError: The value column is absent or the table is empty.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`analyze` returns a new DataFrame and leaves the input unchanged.
+`run_info(result)` returns the summary and method diagnostics.
+The CLI passes `keep=False` so diagnostics do not enter output tables.
+All calculations are deterministic; synthetic CLI demos retain seed 42.
+
+## Gotchas
+
+- `run_info()["summary"]["completeness_pct"]` is assembly length divided by expected genome size, not a gene-completeness assessment.
+- `read_records` uppercases FASTA sequence. GC content excludes N bases; no assembler or QUAST is invoked.
+
+## Inputs and outputs
+
+Input files:
 
 - File types: `.fasta`, `.fa`
 
-**Outputs**
+CLI output files:
 
 - `tables/assembly_metrics.csv`
 - `tables/contig_lengths.csv`
 - `report.md`
 - `result.json`
 
-## Flow
+The library writes no files. Steps use `write_output`; the CLI owns the
+listed artifacts. Public figure functions return matplotlib Figures and
+do not add new CLI outputs.
 
-1. Load FASTA (`--input <assembly.fasta>`) or generate a demo assembly at `output_dir/demo_assembly.fasta` (`genome_assembly.py`).
-2. Parse contigs (`genome_assembly.py`); each line is uppercased on read so case is normalised.
-3. Sort by length; compute cumulative N50 / N90 / L50 / L90 + total / longest + assembly-wide GC% from concatenated sequence.
-4. If `--genome-size` is set and > 0, compute `completeness_pct = total_length / genome_size * 100`.
-5. Write `tables/contig_lengths.csv` (`genome_assembly.py`) + `tables/assembly_metrics.csv` + `report.md` + `result.json`.
-
-## Gotchas
-
-- **No assembler is invoked.** This skill summarises an existing FASTA — it does not run SPAdes / Megahit / Flye / Canu. Run them upstream and feed the resulting FASTA here.
-- **`--input` REQUIRED unless `--demo`.** `genome_assembly.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`.
-- **`--genome-size 0` (default) skips completeness.** Without an expected genome size (`genome_assembly.py`, default 0), the report omits the completeness column entirely. Pass `--genome-size 3000000000` for a human-scale assembly to populate it.
-- **Soft-masked bases are normalised to uppercase before GC counting.** `genome_assembly.py` calls `line.upper()` per FASTA line, so lowercase soft-masked regions contribute identically to hard-masked / unmasked sequence in the GC%. There is no way to exclude soft-masked regions short of pre-filtering the FASTA.
-- **Demo FASTA has 100 contigs of varying length.** `--demo` writes a fixed-pattern synthetic file useful for smoke tests; the N50 it produces is not biologically meaningful.
-
-## Key CLI
+## CLI
 
 ```bash
-# Demo
-python skills/genomics/genomics-assembly/genome_assembly.py --demo --output /tmp/asm_demo
-
-# Real assembly with completeness against expected size
-python skills/genomics/genomics-assembly/genome_assembly.py \
-  --input my_assembly.fasta --output results/ \
-  --genome-size 3100000000
+python skills/genomics/genomics-assembly/genome_assembly.py --input input_file --output results/
+python skills/genomics/genomics-assembly/genome_assembly.py --demo --output /tmp/genomics_assembly_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag
-- `references/methodology.md` — N50 / L50 definitions, GC interpretation
-- `references/output_contract.md` — `tables/assembly_metrics.csv` schema
-- Adjacent skills: `genomics-alignment` (downstream — map reads back to your assembly to validate), `genomics-qc` (upstream — FASTQ QC before assembly), `genomics-cnv-calling` (parallel — copy-number on a known reference instead of de novo)
+- `references/parameters.md`
+- `references/methodology.md`
+- `references/output_contract.md`
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`numpy`, `pandas`
+`numpy`, `pandas`, `matplotlib`

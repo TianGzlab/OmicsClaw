@@ -46,113 +46,6 @@ COMMON_ADAPTERS = {
 }
 
 
-def _generate_demo_fastq(output_path: Path) -> Path:
-    """Generate a synthetic FASTQ for demo."""
-    np.random.seed(42)
-    n_reads = 5000
-    read_len = 150
-    fq = output_path / "demo_reads.fastq"
-    fq.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(fq, "w") as f:
-        for i in range(n_reads):
-            seq = "".join(np.random.choice(list("ACGT"), read_len,
-                          p=[0.28, 0.22, 0.22, 0.28]))
-            if np.random.random() < 0.05:
-                seq = seq[:130] + COMMON_ADAPTERS["Illumina_TruSeq"][:20]
-            quals = np.random.normal(33, 5, read_len).clip(20, 42).astype(int)
-            # Degrade quality at ends
-            quals[:5] -= np.random.randint(3, 8, 5)
-            quals[-10:] -= np.random.randint(5, 12, 10)
-            quals = quals.clip(2, 42)
-            qual_str = "".join(chr(q + 33) for q in quals)
-            f.write(f"@READ_{i:06d}\n{seq}\n+\n{qual_str}\n")
-    return fq
-
-
-def parse_fastq(filepath: Path, max_reads: int = 100000) -> dict:
-    """Parse FASTQ file and compute quality metrics."""
-    open_fn = gzip.open if str(filepath).endswith(".gz") else open
-
-    base_quals: list[list[int]] = []
-    gc_fracs: list[float] = []
-    read_lengths: list[int] = []
-    n_counts: list[int] = []
-    adapter_hits = {name: 0 for name in COMMON_ADAPTERS}
-    n_reads = 0
-    all_quals: list[int] = []
-
-    with open_fn(filepath, "rt") as f:
-        while n_reads < max_reads:
-            header = f.readline().strip()
-            if not header:
-                break
-            seq = f.readline().strip()
-            f.readline()  # +
-            qual_line = f.readline().strip()
-
-            if not seq or not qual_line:
-                break
-
-            n_reads += 1
-            read_len = len(seq)
-            read_lengths.append(read_len)
-
-            # Quality scores
-            quals = [ord(c) - 33 for c in qual_line]
-            all_quals.extend(quals)
-            while len(base_quals) < read_len:
-                base_quals.append([])
-            for pos, q in enumerate(quals):
-                base_quals[pos].append(q)
-
-            # GC content
-            gc = (seq.count("G") + seq.count("C")) / max(len(seq), 1)
-            gc_fracs.append(gc)
-
-            # N content
-            n_counts.append(seq.count("N"))
-
-            # Adapter check
-            for name, adapter_seq in COMMON_ADAPTERS.items():
-                if adapter_seq[:12] in seq:
-                    adapter_hits[name] += 1
-
-    # Per-base quality stats
-    max_pos = len(base_quals)
-    per_base = []
-    for pos in range(max_pos):
-        qs = np.array(base_quals[pos])
-        per_base.append({
-            "position": pos + 1,
-            "mean": float(np.mean(qs)),
-            "median": float(np.median(qs)),
-            "q25": float(np.percentile(qs, 25)),
-            "q75": float(np.percentile(qs, 75)),
-        })
-
-    all_q = np.array(all_quals)
-    q20_rate = float(np.mean(all_q >= 20)) * 100
-    q30_rate = float(np.mean(all_q >= 30)) * 100
-    mean_quality = float(np.mean(all_q))
-
-    return {
-        "n_reads": n_reads,
-        "mean_read_length": float(np.mean(read_lengths)),
-        "mean_quality": round(mean_quality, 2),
-        "q20_rate": round(q20_rate, 2),
-        "q30_rate": round(q30_rate, 2),
-        "mean_gc": round(float(np.mean(gc_fracs)) * 100, 2),
-        "mean_n_content": round(float(np.mean(n_counts)) / max(np.mean(read_lengths), 1) * 100, 4),
-        "adapter_hits": adapter_hits,
-        "adapter_rate": round(sum(adapter_hits.values()) / max(n_reads, 1) * 100, 2),
-        "per_base": per_base,
-        "gc_fracs": gc_fracs,
-        "read_lengths": read_lengths,
-        "all_quals": all_quals,
-    }
-
-
 def generate_figures(output_dir: Path, metrics: dict) -> list[str]:
     fig_dir = output_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
@@ -276,6 +169,8 @@ def write_report(output_dir: Path, metrics: dict, params: dict) -> None:
 
 
 def main() -> None:
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     ap = argparse.ArgumentParser(description=f"{SKILL_NAME} v{SKILL_VERSION}")
     ap.add_argument("--input", type=str, help="FASTQ file")
@@ -286,15 +181,21 @@ def main() -> None:
     output_dir = Path(args.output)
 
     if args.demo:
-        fq = _generate_demo_fastq(output_dir)
-        input_path = fq
+        output_dir.mkdir(parents=True, exist_ok=True)
+        input_path = output_dir / "demo_reads.fastq"
+        data = library.demo_data()
+        with input_path.open('w') as stream:
+            for i, (sequence, quality) in enumerate(data.itertuples(index=False, name=None)):
+                stream.write(f'@READ_{i:06d}\n{sequence}\n+\n{quality}\n')
     else:
         if not args.input:
             ap.error("--input required (or use --demo)")
         input_path = Path(args.input)
 
     logger.info("Parsing FASTQ: %s", input_path)
-    metrics = parse_fastq(input_path)
+    data = library.read_fastq(input_path)
+    result = library.quality_control(data)
+    metrics = library.run_info(result, keep=False)["metrics"]
 
     params = {"input": str(input_path), "output": str(output_dir)}
     generate_figures(output_dir, metrics)

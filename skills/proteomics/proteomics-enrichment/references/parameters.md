@@ -1,14 +1,6 @@
-<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+The public defaults and argument meanings are in the generated API section
+of `../SKILL.md`. Run the documented CLI with `--help` for file and report options.
 
-- `--background-size`
-- `--method`
-- `--species`
-
-## Per-method parameter hints
-
-_No method-specific tuning hints._
+ORA uses one-sided Fisher tests and BH correction. Pass an explicit pathway_db and a background_size matching the measured universe.
