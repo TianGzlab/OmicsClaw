@@ -36,8 +36,8 @@ from .conftest import REAL_REGISTRY, REPO
 
 DECLARED_FALLBACK = {
     # Base scientific stack and general-purpose libraries, not optional backends.
-    "adjustText", "anndata", "dask", "h5py", "matplotlib", "networkx", "numpy",
-    "packaging", "pandas", "PyYAML", "requests", "scanpy", "scikit-learn", "scipy",
+    "adjustText", "anndata", "dask", "filelock", "joblib", "matplotlib", "networkx", "numpy",
+    "pandas", "psutil", "PyYAML", "requests", "scanpy", "scikit-learn", "scipy",
     "statsmodels",
     # Declared by genomics-variant-annotation; not in any domain registry before 0062.
     "mygene",

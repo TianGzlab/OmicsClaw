@@ -116,6 +116,7 @@ def terminal_screen(width: int = 100) -> tuple[Screen, io.StringIO]:
         highlight=False,
         soft_wrap=True,
         emoji=False,
+        _environ={"TERM": "xterm"},
     )
     return Screen(console), buffer
 

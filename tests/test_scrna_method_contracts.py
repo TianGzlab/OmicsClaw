@@ -33,6 +33,8 @@ def _load_module(name: str, relative_path: str):
 
 
 def test_scanvi_fallback_records_requested_and_executed_method(monkeypatch):
+    # Integration loads scanpy lazily; keep the substitute through execution.
+    monkeypatch.setitem(sys.modules, "scanpy", types.ModuleType("scanpy"))
     module = _load_module(
         "sc_integrate_contract_test",
         "skills/singlecell/scrna/sc-batch-integration/_api.py",
