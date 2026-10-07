@@ -8,7 +8,7 @@
 
 | 批次 | 技能 | 状态 |
 |---|---|---|
-| S1 | spatial-preprocess | 实施中 |
+| S1 | spatial-preprocess | 本地验收完成，独立审核已关闭 |
 | S2 | spatial-de、spatial-enrichment、spatial-genes | 待迁移 |
 | S3 | spatial-annotate、spatial-domains、spatial-microenvironment-subset、spatial-statistics | 待迁移 |
 | S4 | spatial-integrate、spatial-register、spatial-condition | 待迁移 |
@@ -35,11 +35,44 @@
 
 ## 交付记录
 
-S1 已实现，独立审核尚未完成。后续批次不因计划列出而视为已交付。
+S1 已完成本地验收和独立审核，位于 `feat/spatial-skill-migration`，尚未合并或推送。后续 16 个空间技能不因计划列出而视为已交付。
 
 - 旧 CLI 默认参数和多分辨率变体各录两次，均逐值一致；记录的代码基线为 `d70b3225`，不排除数值列。
-- 初次函数、表格和 CLI parity 验证 7 项通过；临时 CI 环境的 API 测试 16 项通过，示例执行和 fresh-kernel replay 2 项通过。
+- 科学环境的技能及 CLI/API parity 最终检查 29 项通过，耗时 67.54 秒；独立审核重跑 API 17 项通过。临时 CI 环境的空间技能快速测试、API 文档和 demo 读写检查 74 项通过，示例执行和 fresh-kernel replay 2 项通过。
 - 生成文档、空间技能分类、域索引和 parity 工具共 56 项通过。
-- 首次 SDK、技能加载和依赖环境回归为 1,233 passed、6 skipped、2 xpassed、5 failed。五项失败均来自新增依赖后的固定数量或映射断言；补齐 `scikit-misc -> skmisc`、`umap-learn -> umap` 并更新断言后，155 项相关测试通过。完整回归待重跑。
+- 首次 SDK、技能加载和依赖环境回归为 1,233 passed、6 skipped、2 xpassed、5 failed。五项失败均来自新增依赖后的固定数量或映射断言；补齐 `scikit-misc -> skmisc`、`umap-learn -> umap` 并更新断言后，155 项相关测试通过。完整重跑为 1,242 passed、6 skipped、44 deselected、2 xpassed，耗时 213.74 秒。两项 XPASS 是仓库已有的环境相关标记，不是本批新增失败。
 - 缺后端测试先发现缺少安装提示；原来的四乘五常数矩阵在 LOESS 内触发原生崩溃。现改为真实合成输入，并在计算前检查后端、给出 `install_skill_deps` 提示。崩溃转储移至 `/tmp/omicsclaw-0075-loess.core`，不提交。此批不承诺 Seurat v3 对任意退化矩阵均可拟合。
 - CI 的原有临时 venv 仅新增 [scikit-misc 0.5.2](https://pypi.org/project/scikit-misc/0.5.2/)，未改基础 conda 环境；远端 CI 尚未运行。
+- 索引核验为 88 个技能、0 skipped；函数库为单细胞 27 个、空间 1 个。CLI `--help` 与 `git diff --check` 均通过。
+
+复现主要检查：
+
+```bash
+NUMBA_DISABLE_JIT=0 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
+  /opt/conda/envs/OmicsClaw/bin/python -m pytest \
+  skills/spatial/spatial-preprocess/tests tests/parity/test_sc_parity.py \
+  -k spatial --import-mode=importlib -q -o addopts=""
+
+/opt/conda/envs/OmicsClaw/bin/python -m pytest \
+  tests/sdk tests/skills tests/skillenv tests/parity/test_snapshot.py \
+  --import-mode=importlib -m "not slow and not skill_example" -q -o addopts=""
+
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
+  /tmp/omicsclaw-0074-m1.plB2Nv/ci-venv/bin/python -m pytest \
+  tests/sdk/notebook/test_skill_examples.py -k spatial -q -o addopts=""
+```
+
+真实组织数据、LLM 自主选用技能、真实容器和远端 CI 不在本批已验证范围。
+
+## Standards
+
+独立子 agent 首轮发现 1 项 P3：输出契约没有列出七个 PNG 文件名。
+提交 `d4047a62` 补齐路径和逐项生成条件，原审核 agent 复核关闭。
+最终未关闭项为 0。
+
+## Spec
+
+独立子 agent 对照 `d70b3225...HEAD`、本次确认的三个验收入口及 S1
+需求，发现 0 项。审核另行执行科学环境 API 测试 17 项、CI 轻环境
+示例执行和 fresh-kernel replay 2 项，均通过；核对了两组原 CLI
+基线的提交、重复运行一致性和空排除表，未自行重跑 CLI parity。
