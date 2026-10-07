@@ -11,14 +11,13 @@ first instead, as running the script would.
 
 from __future__ import annotations
 
-import json
 import shlex
 import subprocess
 import sys
 
 import pytest
 
-from omicsclaw.skillenv.probe import ProbeError, parse_probe, probe_argv, probe_command
+from omicsclaw.skillenv.probe import ProbeError, parse_probe, probe_command
 
 
 def _run_shell(command: str, cwd, env=None):
@@ -109,13 +108,3 @@ def test_base_prefix_and_user_site(tmp_path):
     assert result.from_user_site == ("oc_user_only",)
     assert result.base_prefix == sys.base_prefix
     assert result.prefix == sys.prefix
-
-
-def test_argv_form_matches_the_shell_form(tmp_path):
-    argv = probe_argv(sys.executable, ["json", "oc_surely_missing_mod"], ["pip"], str(tmp_path))
-    assert argv[:3] == [sys.executable, "-B", "-c"]
-    proc = subprocess.run(argv, cwd=tmp_path, capture_output=True, text=True, timeout=60)
-    from_argv = parse_probe(proc.stdout)
-    from_shell = _run_shell(_command(["json", "oc_surely_missing_mod"], ["pip"], tmp_path), tmp_path)
-    assert from_argv == from_shell
-    assert json.loads(argv[4])["imports"] == ["json", "oc_surely_missing_mod"]

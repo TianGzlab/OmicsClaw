@@ -59,14 +59,14 @@ built twice. A deployment is therefore
 call has no queues — :meth:`AgentApp.aclose` has nothing to drain and
 ``/chat/stream`` raises.
 
-**Skills are wired in, after all.** Plan 0031 Q10 and §12-1 ruled them
-out of this step; ``docs/plans/0032-skill-loader.md`` landed afterwards
-and its lane mounted ``use_skill`` and a catalogue section here. So this
-module imports :mod:`omicsclaw.skills`, :func:`foundation_tools` appends
-:func:`~omicsclaw.skills.use_skill_tool`, and
-:func:`default_sections` returns six sections rather than five.
-``AppConfig.skills_index`` is the switch: ``off`` restores the
-five-section prompt and the six-tool registry exactly.
+**Skills.** This module imports :mod:`omicsclaw.skills`:
+:func:`foundation_tools` appends :func:`~omicsclaw.skills.use_skill_tool`
+and :func:`default_sections` adds a skill catalogue section.
+``AppConfig.skills_index`` is the switch, and ``off`` drops both. The
+prompt is the contract, safety rules and tool guidance, then the
+optional planning, execution sandbox and skills sections, the
+environment, and the optional long-term memory block;
+:func:`default_sections` documents when each optional one appears.
 """
 
 from __future__ import annotations

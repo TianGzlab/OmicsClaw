@@ -91,7 +91,7 @@ og:image: "/docs/images/og-cover.png"
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ 1. 用户接口层                                                │
-│    CLI (omicsclaw.py)  ·  Bot (Telegram + Feishu)  ·  App    │
+│    CLI (oc cli)  ·  Bot (Telegram + Feishu)  ·  App         │
 ├──────────────────────────────────────────────────────────────┤
 │ 2. 单进程控制与编排层                                        │
 │    control.db：Receipts + submission/assignment bindings    │
@@ -123,44 +123,48 @@ og:image: "/docs/images/og-cover.png"
 | 一致性 | 各人风格不统一 | 模板化报告输出 |
 | 故障隔离 | 一处 bug 全局崩溃 | skill 级别边界隔离 |
 
-## 关键调用链：从 `omicsclaw.py run X` 到产出
+## 关键调用链：从一句请求到产出
+
+旧的 `omicsclaw.py run` 入口、`omicsclaw/core/registry.py` 和 `skill_runner.py` 都已删除。现在 skill 由 agent 调用：
 
 ```
 ┌──────────────────────────────────────────────┐
-│  omicsclaw.py 入口 — argparse + dispatch     │
+│  oc cli / oc channel / oc desktop            │
+│  入口 omicsclaw/launch/，会话层 omicsclaw/entry/ │
 └──────────────────────────────────────────────┘
                        ▼
 ┌──────────────────────────────────────────────┐
-│  omicsclaw/core/registry.py 加载             │
-│  发现 SKILL.md + 入口脚本                    │
+│  omicsclaw/skills/loader.py 启动时扫描       │
+│  skills/**/SKILL.md，建成 SkillIndex         │
+│  （omicsclaw/skills/index.py）               │
 └──────────────────────────────────────────────┘
                        ▼
 ┌──────────────────────────────────────────────┐
-│  omicsclaw/core/skill_runner.py 校验参数     │
-│  并构造受控的 skill 调用                     │
+│  agent 调 use_skill，拿到 SKILL.md 正文      │
+│  和 skill 目录（omicsclaw/skills/use_skill.py）│
 └──────────────────────────────────────────────┘
                        ▼
 ┌──────────────────────────────────────────────┐
-│  shared runner 执行 skill 并统一补输出 UX    │
+│  agent 用 bash 运行 skill 脚本               │
+│  脚本只依赖 skills/_sdk 与各域 _lib          │
 └──────────────────────────────────────────────┘
                        ▼
 ┌──────────────────────────────────────────────┐
-│  Run Store：Manifest + artifacts             │
-│  Control Plane：Run Receipt + Binding + Assignment │
+│  输出目录：report.md + result.json + 图表    │
 └──────────────────────────────────────────────┘
 ```
 
-示例命令：
+示例命令（不经 agent，直接跑 skill 脚本）：
 
 ```bash
-python omicsclaw.py run spatial-preprocess --demo --output /tmp/demo_out
+python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/demo_out
 ```
 
 ## 故障排查
 
 | 症状 | 可能原因 | 解决 |
 |---|---|---|
-| `omicsclaw.py list` 报 skill 找不到 | conda 环境未激活 | `conda activate OmicsClaw` |
+| skill 脚本 import 失败 | conda 环境未激活 | `conda activate OmicsClaw` |
 | 某 skill 缺 R 依赖 | R Enhanced 依赖未装 | 见 [R-DEPENDENCIES.md](https://github.com/TianGzlab/OmicsClaw/blob/main/docs/_legacy/R-DEPENDENCIES.md) |
 | Bot 无响应 | `.env` 缺 `LLM_API_KEY` | 见 [ecosystem/chat-bot](/docs/ecosystem/chat-bot) |
 

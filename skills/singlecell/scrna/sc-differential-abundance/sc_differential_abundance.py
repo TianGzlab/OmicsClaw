@@ -47,7 +47,6 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
@@ -842,7 +841,6 @@ def main() -> int:
         {"skill": "sc-de", "reason": "Differential expression in abundance-changed populations", "priority": "optional"},
     ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, input_checksum)
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
 
     # ---- report.md ----
     _write_report(output_dir, summary, params, input_path, diagnostics)

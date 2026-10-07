@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from .longterm import Category, MemoryEntry
@@ -81,12 +83,15 @@ class Precis:
     async def regenerate(self) -> str:
         """Rebuild the file from the store's top entries.
 
+        The file is replaced in one step, so a reader sees either the old
+        contents or the new ones, and it is left with mode 0600.
+
         :returns: The Markdown that was written.
         """
         entries = list(await self._store.list(self.max_entries))
         content = render(entries, self.max_bytes)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(content, encoding="utf-8")
+        _replace_private(self.path, content)
         return content
 
     def read(self) -> str:
@@ -97,3 +102,16 @@ class Precis:
         if not self.path.exists():
             return ""
         return self.path.read_text(encoding="utf-8")
+
+
+def _replace_private(path: Path, content: str) -> None:
+    """Write *content* to a temporary file beside *path*, set mode 0600, and move it over *path*."""
+    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise

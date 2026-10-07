@@ -17,7 +17,6 @@ from .probe import (
     ProbeRunner,
     SandboxProbeRunner,
     parse_probe,
-    probe_argv,
     probe_command,
     run_probe,
 )
@@ -46,7 +45,6 @@ __all__ = [
     "SandboxProbeRunner",
     "parse_dependencies",
     "parse_probe",
-    "probe_argv",
     "probe_command",
     "probe_plan",
     "read_registry",

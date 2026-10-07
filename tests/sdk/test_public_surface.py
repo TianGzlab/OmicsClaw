@@ -21,7 +21,7 @@ PUBLIC_SURFACE: dict[str, set[str]] = {
     "skills._sdk": {"REPO_ROOT"},
     "skills._sdk.checksums": {"sha256_file"},
     "skills._sdk.report": {"generate_report_header", "generate_report_footer", "write_repro_requirements"},
-    "skills._sdk.result": {"RESULT_SCHEMA", "write_result_json", "load_result_json", "mark_result_status", "write_owned_text"},
+    "skills._sdk.result": {"RESULT_SCHEMA", "write_result_json", "load_result_json", "mark_result_status"},
     "skills._sdk.runtime_env": {"ensure_runtime_cache_dirs"},
     "skills._sdk.user_guidance": {"emit_user_guidance", "emit_user_guidance_payload"},
     "skills._sdk.deps": {"DEPENDENCIES", "require", "get", "is_available", "install_hint", "validate_r_environment"},

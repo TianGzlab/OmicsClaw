@@ -8,6 +8,7 @@ through a lock, so callers may reach it from any thread — which is what
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -67,16 +68,26 @@ BUSY_TIMEOUT_S = 15.0
 """How long a statement waits for another connection to let go."""
 
 
+PRIVATE_FILE_MODE = 0o600
+"""Mode of a database file this class creates, and of its ``-wal`` and ``-shm`` files."""
+
+
 class Database:
     """A SQLite connection shared safely across threads.
+
+    A database file that does not exist yet is created with mode 0600, and
+    its ``-wal`` and ``-shm`` files get the same mode. The mode of an
+    existing file is left alone.
 
     :param path: File to open, or ``":memory:"`` for a transient database.
     """
 
     def __init__(self, path: str | Path = ":memory:") -> None:
         self.path = str(path)
+        created = False
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+            created = _create_private(self.path)
         # check_same_thread=False plus the lock below: one connection
         # reached from many worker threads, rather than one connection per
         # thread, which would give ":memory:" a separate empty database per
@@ -103,6 +114,12 @@ class Database:
                 pass
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+        if created:
+            for suffix in ("-wal", "-shm"):
+                try:
+                    os.chmod(self.path + suffix, PRIVATE_FILE_MODE)
+                except FileNotFoundError:
+                    pass
 
     def run(self, work: Callable[[sqlite3.Connection], T]) -> T:
         """Call *work* with the connection held, committing on success.
@@ -141,3 +158,16 @@ class Database:
 
     def __exit__(self, *exc: Any) -> None:
         self.close()
+
+
+def _create_private(path: str) -> bool:
+    """Create an empty file at *path* with mode 0600 unless one exists.
+
+    :returns: ``True`` when this call created the file.
+    """
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE)
+    except FileExistsError:
+        return False
+    os.close(descriptor)
+    return True

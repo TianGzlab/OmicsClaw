@@ -3,6 +3,8 @@
 **日期**：2026-09-24。**规格**：`docs/plans/0056-ensemble-foundation.md` 第 2.1 版（本记录不改动计划正文）。
 **状态**：T0–T9 已实施；未 commit。T3b 偏差报告待 owner 过目（0057 开工门槛，计划 §6 第 9 条）。
 
+**2026-10-07 补记**：ensemble 层已于 2026-10-02 删除，代码存档在 tag `archive/ensemble-before-removal`。本计划已被取代，不再实施或维护。
+
 ## 1. 各步完成情况
 
 | 步 | 内容 | 落点 |

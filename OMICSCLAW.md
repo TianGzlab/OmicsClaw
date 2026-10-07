@@ -198,9 +198,9 @@ python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/de_demo
 
 ## Re-rendering plots
 
-Some skills write a `replot` block into `result.json` that names
-`python omicsclaw.py replot`. That command does not exist: to change a
-plot, re-run the skill. Do not offer `replot` to a user.
+To change a plot, re-run the skill with new parameters. A `result.json`
+from an older run may still hold a `replot` block; the command it names
+was removed.
 
 ## User-facing notes
 

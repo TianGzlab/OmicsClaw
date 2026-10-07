@@ -2,6 +2,8 @@
 
 **状态**：第 3.1 版（2026-09-26），按复审与 owner 裁定局部修订，待 owner 终审；未写任何生产代码。
 
+**2026-10-07 补记**：ensemble 层已于 2026-10-02 删除，代码存档在 tag `archive/ensemble-before-removal`。本计划已被取代，不再实施或维护。
+
 **前置**：0056 基础层已实施、未 commit（`docs/plans/0056-ensemble-foundation-delivery.md`）；面板偏差研究四节已完成
 （`docs/plans/0056-panel-bias-report.md`，下称"0056 报告"）。本计划是 0056–0060 系列的第二份，输出接口给 0058（§3.14），并为 0059
 预登记确证设计（§4.9）。

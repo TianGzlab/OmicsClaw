@@ -2,6 +2,8 @@
 
 **状态**：第三版（2026-09-23）。经独立审核、架构审核与 harness9 对照，owner 按推荐裁定，已据此返工。第四轮收敛审核后修订（第三版修订：任务 D 的 `was_seen` 与 owner 第四轮裁定第 4 项、问题卡按宽度折行、禁词核实、§3.5.3 与 §3.6.2 措辞、原语校验归属）；第五轮审核与 owner 裁定（2026-09-24）后再修订（`QUESTION_ASKED` 经 `inert_prose`、问题卡改走 `inert_body`、折行标记、Channel 上截断即不出卡、行号）。待 owner 过目。未写任何生产代码。
 
+**2026-10-07 核对**：本计划的任务都还没有实现。
+
 **依赖**：A 随时可做。**B 依赖 0052 T1**（抽出会合原语 `Rendezvous` 到 `entry/rendezvous.py`、
 `TurnHandle` 持有审批与提问共用的编号计数器、加 `TurnEvent.subagent`；本计划字段追加其后，裁定
 10）与缺陷修复 E1（`entry/display.py`，函数已在工作树）。C 依赖 B 与已扩展的 `Repl._read_card`

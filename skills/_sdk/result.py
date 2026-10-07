@@ -22,7 +22,6 @@ __all__ = [
     "write_result_json",
     "load_result_json",
     "mark_result_status",
-    "write_owned_text",
 ]
 
 logger = logging.getLogger(__name__)

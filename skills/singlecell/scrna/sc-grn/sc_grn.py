@@ -50,7 +50,6 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills._sdk.checksums import sha256_file
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
@@ -979,7 +978,6 @@ def main():
     if r_enhanced_figures:
         result_data["r_enhanced_figures"] = r_enhanced_figures
         write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
 
     # Summary
     print(f"\n{'='*60}")

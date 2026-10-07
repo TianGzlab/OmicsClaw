@@ -32,7 +32,6 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
@@ -436,7 +435,6 @@ def main() -> int:
             output_dir, SKILL_NAME, SKILL_VERSION, summary, data_payload,
             input_checksum=input_checksum,
         )
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
 
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,

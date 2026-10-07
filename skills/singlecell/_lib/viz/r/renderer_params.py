@@ -1,7 +1,6 @@
 """Renderer parameter schemas for R Enhanced plots.
 
 Maps each renderer name to its tunable parameters with type, default, and description.
-Used by ``replot`` to validate and document available params for each renderer.
 
 Derived from ``params[[...]]`` usage in each R file under viz/r/.
 """
