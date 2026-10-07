@@ -320,7 +320,7 @@ Channel 需要的变量见 `.env.example` 第 11 节；飞书需要 `FEISHU_APP_
 Channel 界面要求审批期限：加 `--approval-timeout <秒>` 或 `OMICSCLAW_APPROVAL_TIMEOUT_S`。注意当前 Channel 上还无法回答审批，需要审批的工具会在期限到时被拒。
 
 **Q：有没有 `oc run <skill>`、`python omicsclaw.py replot`？**
-没有，都已删除。直接运行 `python skills/<domain>/<skill>/<script>.py`，或让 agent 在会话里跑。`result.json` 里的 `replot` 提示指向的命令不存在。
+没有，都已删除。直接运行 `python skills/<domain>/<skill>/<script>.py`，或让 agent 在会话里跑。要改图就重跑 skill；旧运行的 `result.json` 里如果还有 `replot` 块，它指向的命令已不存在。
 
 **Q：会话存在哪里？怎么继续？**
 `<workspace>/.omicsclaw/memory.db`。`/sessions` 查看，`/resume` 或 `oc cli --session <id>` 继续。

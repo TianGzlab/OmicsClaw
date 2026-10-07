@@ -429,9 +429,8 @@ skill 脚本依赖的"科学层"。计划 0062 起它全部在 `skills/_sdk/`，
 
 | 模块 | 提供 |
 |---|---|
-| `skills/_sdk/report.py`、`result.py` | `generate_report_header` / `generate_report_footer`、`write_repro_requirements`；`write_result_json`（`result.json` 信封，结构见 `RESULT_SCHEMA`）、`load_result_json`、`mark_result_status`、`write_owned_text` |
+| `skills/_sdk/report.py`、`result.py` | `generate_report_header` / `generate_report_footer`、`write_repro_requirements`；`write_result_json`（`result.json` 信封，结构见 `RESULT_SCHEMA`）、`load_result_json`、`mark_result_status` |
 | `skills/_sdk/checksums.py`、`runtime_env.py`、`user_guidance.py` | 输入文件 SHA-256（`sha256_file`）、科学栈缓存目录（`ensure_runtime_cache_dirs`）、用户指引行 |
-| `skills/singlecell/_lib/viz/r/replot_hint.py` | 已失效的 `write_replot_hint`（见 §13） |
 | `omicsclaw/common/report.py` 等 | 框架侧：`validate_result_envelope`、`DISCLAIMER`、`write_output_readme`、`.env` 读取（启动层的 `_adopt_dotenv` 用 `runtime_env.load_env_file`）、输出目录归属（`output_claim.py`） |
 | `skills/_sdk/r_script_runner.py`、`r_utils.py`、`r_dependency_manager.py`、`r_scripts/` | 调用 R（CellChat、Numbat 等 R 后端）；原 `omicsclaw/core/` 与 `omicsclaw/r_scripts/`，计划 0062 阶段一搬入 |
 | `skills/_sdk/deps.py`、`external_env.py` | 可选依赖检测、外部 conda 子环境调用；`skills/_sdk/` 不导入 `omicsclaw` |
@@ -525,9 +524,8 @@ make skill-index      # = OMICSCLAW_WRITE_SKILL_INDEX=1 pytest tests/skills/test
 
 ## 13. 已知限制
 
-1. **`replot` 死链仍在产品输出里**。22 个 skill 脚本调用 `skills/singlecell/_lib/viz/r/replot_hint.py` 的 `write_replot_hint`，
-   往 `result.json` 写一个指向 `python omicsclaw.py replot` 的 `replot` 块，而该命令已不存在。
-   R 渲染器和 `figure_data/` 仍会产出，但目前除了重跑 skill 没有办法重绘。不要向用户提供这个命令。
+1. **没有单独的重绘命令**。R 渲染器和 `figure_data/` 仍会产出，但要改图只能重跑 skill。
+   2026-10-07 起 skill 不再往 `result.json` 写 `replot` 块；旧运行留下的 `replot` 块指向的命令已删除。
 2. **`oc run` 残留**。`SKILL.md` 正文里的 `oc run` 已在工作树中清理（`grep` 计数为 0），但 skills/ 下仍有 15 个文件
    （主要是 `references/methodology.md`）提到 `oc run` / `omicsclaw.py run`。
    FRAMEWORK-REBUILD.md "Open after the migration" 记录的"96 个 SKILL.md 仍写 oc run"是迁移当时的状态。

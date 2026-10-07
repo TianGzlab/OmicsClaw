@@ -39,7 +39,6 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -669,7 +668,6 @@ def main():
     if r_enhanced_figures:
         result_data["r_enhanced_figures"] = r_enhanced_figures
         write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
 
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,

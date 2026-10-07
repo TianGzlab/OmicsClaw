@@ -1962,7 +1962,7 @@ routing block that hid a deprecated skill. Nothing enforces any of them.
 
 | Open | Detail |
 |---|---|
-| 22 skills write a dead `replot` hint | `skills/singlecell/_lib/viz/r/replot_hint.py:write_replot_hint` (moved out of `common/report.py` by plan 0062) patches `result.json` with a block pointing at `python omicsclaw.py replot`. That command is gone. This is a false string in **product output**, not in a document. |
+| ~~22 skills write a dead `replot` hint~~ closed | `write_replot_hint` and its 22 call sites were deleted on 2026-10-07, so skills no longer write a `replot` block into `result.json`. To change a plot, re-run the skill. |
 | `scripts/` is 18/29 broken | Including `generate_skill_md.py` and `generate_routing_table.py`, both on `omicsclaw.skill`. SKILL.md files cannot be regenerated; edit by hand. |
 | ~~Ten Makefile targets call dead entry points~~ closed | `demo`, `demo-all` and `demo-bulkrna` call the skill scripts, `list` calls `omicsclaw.skills.load_skills`, and the `bot-*` targets call `oc channel`. `demo-orchestrator`, `catalog` and `memory-server` were deleted. |
 | 96 SKILL.md still document `oc run` | Their own flags are only written there, so this is the highest-value documentation left. |

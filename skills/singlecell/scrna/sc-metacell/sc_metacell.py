@@ -28,7 +28,6 @@ from skills._sdk.report import (
     generate_report_header,
 )
 from skills._sdk.result import write_result_json
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -519,7 +518,6 @@ def main() -> int:
             output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data,
             input_checksum=input_checksum,
         )
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
 
     # -- Report --
     _write_report(output_dir, summary, params, input_path, diagnostics, preflight_warnings)

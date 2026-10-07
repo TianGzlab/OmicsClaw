@@ -45,7 +45,6 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills._sdk.r_dependency_manager import check_r_tier, suggest_r_install
 from skills._sdk.r_script_runner import RScriptRunner
 from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
@@ -1375,7 +1374,6 @@ def main() -> None:
         {"skill": "sc-gene-programs", "reason": "Discover gene programs along the trajectory", "priority": "optional"},
     ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
 
     # R Enhanced figures (only when --r-enhanced flag is set)

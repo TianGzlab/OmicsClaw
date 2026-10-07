@@ -49,7 +49,6 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills._sdk.checksums import sha256_file
 from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
@@ -885,7 +884,6 @@ def main():
     }
     result_data["next_steps"] = []
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
-    write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
         "summary": summary,

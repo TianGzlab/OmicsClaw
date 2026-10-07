@@ -1,39 +1,30 @@
-"""``write_replot_hint`` after its move into single-cell ``_lib`` (plan 0062 Q2, case 21).
+"""Skills no longer write a ``replot`` hint into ``result.json``.
 
-Moved unchanged from ``omicsclaw/common/report.py`` so the framework no
-longer imports ``skills.*``. The command it writes still names the retired
-``python omicsclaw.py replot`` (see ``OMICSCLAW.md``); fixing that is out of
-scope here, the move only preserves behaviour.
+The hint named ``python omicsclaw.py replot``, a command removed with the
+old CLI. There is no replacement re-render command, so the hint and its
+22 call sites were deleted rather than repointed; changing a plot means
+re-running the skill, which is what ``OMICSCLAW.md`` tells the agent.
 """
 
 from __future__ import annotations
 
-import json
+from pathlib import Path
 
-from skills._sdk.result import write_result_json
-from skills.singlecell._lib.viz.r.renderer_params import SKILL_RENDERERS
-from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
+REPO = Path(__file__).resolve().parents[2]
 
 
-def test_a_known_skill_gets_a_replot_block(tmp_path):
-    skill = "sc-batch-integration"
-    assert skill in SKILL_RENDERERS
-    write_result_json(tmp_path, skill, "1", {}, {})
-    write_replot_hint(tmp_path, skill)
-    payload = json.loads((tmp_path / "result.json").read_text())
-    assert payload["replot"]["available"] is True
-    assert set(payload["replot"]["renderers"]) == set(SKILL_RENDERERS[skill])
-    assert payload["replot"]["command"].endswith(f"{skill} --output {tmp_path}")
+def test_no_skill_script_writes_the_replot_hint():
+    offenders = [
+        path.relative_to(REPO).as_posix()
+        for path in (REPO / "skills").rglob("*.py")
+        if "write_replot_hint" in (text := path.read_text(encoding="utf-8", errors="replace"))
+        or "omicsclaw.py replot" in text
+    ]
+    assert offenders == []
+    assert not (REPO / "skills/singlecell/_lib/viz/r/replot_hint.py").exists()
 
 
-def test_an_unknown_skill_leaves_the_file_alone(tmp_path):
-    before = write_result_json(tmp_path, "no-such-skill", "1", {}, {}).read_text()
-    write_replot_hint(tmp_path, "no-such-skill")
-    assert (tmp_path / "result.json").read_text() == before
-
-
-def test_a_broken_result_json_does_not_raise(tmp_path):
-    (tmp_path / "result.json").write_text("{broken")
-    write_replot_hint(tmp_path, "sc-batch-integration")
-    assert (tmp_path / "result.json").read_text() == "{broken"
-    write_replot_hint(tmp_path / "missing", "sc-batch-integration")
+def test_the_runtime_contract_does_not_name_the_removed_command():
+    contract = (REPO / "OMICSCLAW.md").read_text(encoding="utf-8")
+    assert "omicsclaw.py replot" not in contract
+    assert "re-run the skill" in contract
