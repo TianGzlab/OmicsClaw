@@ -269,6 +269,7 @@ Desktop 聊天协议的主版本保持 v3（中断请求仍为 v1）。新增可
    `resume` 是布尔，缺省 `false`，不是布尔 → `422 invalid_resume`，为真时不要求 `content`；
    请求声明的 `workspace` 与后端不一致 → `409 workspace_does_not_match_backend_runtime`，无法解析成路径（含 NUL、`~user` 无此用户等）→ `422 invalid_workspace`；
    `permission_profile` 只能是 `default` 或 `full_access`（其他值 → `422 invalid_permission_profile`），在 exchange 开始前写入会话，缺省则保持原值；
+   `module_review_requested` 是可选布尔值，缺省 `false`，类型错误 → `422 invalid_module_review_requested`。只有本次请求为 `true` 时，桌面端才允许调用 `module-reviewer`；它不写入会话配置，不沿用上一回合的值。App 在用户点击已完成回复下方的“独立审查”后发送它；
    `model`、`effort`、`thinking` 等字段接受但忽略；
 4. `to_inbound()` 把幂等键做命名空间限定，重发同一 `source_request_id` 会接到**同一个** exchange（只在本进程内有效）；
    **`resume: true`** 只接回已有的 exchange：按 `(session_id, source_request_id)` 在 `DesktopInteractions` 里找 `turn_id`，再 `registry.handle(turn_id)`，

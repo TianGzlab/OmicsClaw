@@ -305,6 +305,10 @@ def decode_chat_stream_request(
     if not isinstance(resume, bool):
         raise DesktopIngressError("invalid_resume")
 
+    review_requested = document.get("module_review_requested", False)
+    if not isinstance(review_requested, bool):
+        raise DesktopIngressError("invalid_module_review_requested")
+
     content = "" if resume else _string(document, "content")
     if not content and not resume:
         raise DesktopIngressError("content_required")
@@ -334,7 +338,11 @@ def decode_chat_stream_request(
         source_request_id=source_request_id,
         installation_id=installation_id,
         workspace=_string(document, "workspace"),
-        values={"surface": DESKTOP_SURFACE, "installation_id": installation_id},
+        values={
+            "surface": DESKTOP_SURFACE,
+            "installation_id": installation_id,
+            "module_review_requested": review_requested,
+        },
         permission_profile=permission_profile,
         resume=resume,
     )

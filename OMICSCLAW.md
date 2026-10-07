@@ -140,8 +140,16 @@ A step is **stale** when its file changed, or a file it read changed, since its 
 
 1. `replay` the module. Done when every step, the validate step included, reports `ok`.
 2. Write `results/<NN_slug>/M<NN>_<slug>_REPORT.md`: what was done, the key numbers with the tables they come from, the figures, and the disclaimer.
-3. Call `task` with `subagent_type="module-reviewer"`, `review_module="<NN_slug>"` and a prompt naming the module. The framework saves the review unchanged and returns its path under `results/<NN_slug>/reviews/task-review-*.md`, with a JSON receipt binding the text and reviewed files to this replay. Use that path directly. If saving fails or the verdict is malformed, request a fresh review. On `VERDICT: REVISE`, fix the findings and go back to step 1. Skip the review only when the user asks you to.
-4. Show the user the report and the verdict. When the user says the module is accepted, run `accept analysis/<NN_slug> --review <review file>`, or `--skip-review "<the user's words>"` when they asked to skip the review.
+3. Show the report and results immediately after validation. Independent review is off by default; finish the reply without calling `module-reviewer` or waiting for a review. An unreviewed result is not an approved result.
+4. When the user explicitly accepts the module, run `accept analysis/<NN_slug> --review <review file>` if a current review exists. Use `--skip-review "<the user's words>"` only when the user explicitly accepts without review; the default off state alone is not acceptance.
+
+### Independent review on request
+
+In the Desktop App, the user starts a review with the **Independent review** button below a completed assistant reply. That click enables review for its new turn only. Ordinary Desktop turns cannot run `module-reviewer`, even if an earlier turn requested it. In CLI and Channel, review only when the current user request explicitly asks for it.
+
+Identify the module belonging to the selected reply and check that its report and successful replay still match that result. If there is no identifiable module or the files have changed, explain why that result cannot be reviewed; do not choose another module or rerun the analysis.
+
+Call `task` with `subagent_type="module-reviewer"`, `review_module="<NN_slug>"` and a short prompt naming the module. The reviewer already has its checklist. The framework saves its reply unchanged under `results/<NN_slug>/reviews/task-review-*.md`, with a receipt binding the reviewed files to this replay. Report the verdict, findings and saved path. If the review fails, report that it is incomplete. A review request authorizes inspection and saving the review, not fixing findings, rerunning analysis or accepting the module; wait for a separate user request for those actions.
 
 `accept` checks the receipt for framework-saved reviews. Editing the review, README, report or brief, or changing its replay, requires a fresh review. Manually written reviews remain supported without receipts; use them for a human review, not a copy of a delegated reply. Receipts are checksums in the workspace, not signed attestations.
 

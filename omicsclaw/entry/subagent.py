@@ -40,6 +40,7 @@ from omicsclaw.tools import ToolRegistry, report_progress
 from omicsclaw.tools.context import current_context, report_usage
 from omicsclaw.subagent.task_tool import REVIEW_MODULE_KEY
 from omicsclaw.tools.base import Tool
+from omicsclaw.tools.function_tool import ToolArgumentError
 
 from .config import AppConfig
 from .memory import MEMORY_WRITE_TOOL_NAME
@@ -187,6 +188,7 @@ when any finding would change a number, a figure or a conclusion."""
 MODULE_REVIEWER = SubAgentDefinition(
     name="module-reviewer",
     description=(
+        "Only when the user requests independent review (the review button in Desktop). "
         "Reviews one analysis module after it has been replayed and before the user "
         "accepts it: reads its step files, outputs, manifest and report, and returns "
         "VERDICT: APPROVE or VERDICT: REVISE with findings. Read-only."
@@ -301,7 +303,18 @@ class ChildRunner:
         of the context isolation: there is no path by which the parent's
         history could reach it.
         """
-        module = current_context().values.get(REVIEW_MODULE_KEY)
+        values = current_context().values
+        if (
+            definition.name == "module-reviewer"
+            and values.get("surface") == "desktop"
+            and values.get("module_review_requested") is not True
+        ):
+            raise ToolArgumentError(
+                "Independent review is off for this Desktop turn. "
+                "Show the analysis results now. The user can start a review "
+                "with the Independent review button below a completed reply."
+            )
+        module = values.get(REVIEW_MODULE_KEY)
         archive = ReviewArchive(self._config.workspace, module) if isinstance(module, str) else None
         if archive:
             prompt = f"Review module {module}.\n\n{prompt}"

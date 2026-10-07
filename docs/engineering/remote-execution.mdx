@@ -189,8 +189,30 @@ App 的 Next 路由发现它与后端的连接断了（读取出错、流没有 
 | 断线后很久 App 才放弃，或新消息等很久才开始 | 服务器的 sshd 没设 `ClientAliveInterval` 与 `ClientAliveCountMax`；再看 `--abandon-grace` 是否设得过长 |
 | 隧道停在断开状态，状态灯旁有"重新连接"按钮 | 认证类错误不自动重试：检查私钥、ssh-agent 或主机密钥，改好后点"重新连接" |
 | 自动启动后 15 秒内没连上 | 看服务器上的 `oc-desktop.log`；确认 `oc` 在登录 shell 的 PATH 里；先手动启动一次 |
+| 已连接，但聊天一直显示“思考中” | 在服务器测试 `POST /providers/test`，再检查启动后端时的出网代理；`/health` 与 `/env/doctor` 不会实际调用模型 |
 | 预览提示文件被隐藏，或只能查看工作区里的文件 | 以 `.` 开头的路径和工作区之外的路径不能在 App 里查看 |
 | 预览提示文件超过 64 MiB | 远程模式下不预览这么大的文件 |
+
+### 已连接，但聊天一直显示“思考中”
+
+“后端已连接”表示 App 能访问服务器上的 `oc desktop`。模型请求由服务器发出，还需要服务器能连接模型 API。`/health` 和 `/env/doctor` 只报告进程与配置状态，不验证模型 API 的连通性。
+
+2026-10-07 的一次实测中，App 的聊天请求已经到达后端，但后端继承的 `HTTP_PROXY`、`HTTPS_PROXY` 及小写变量指向 `127.0.0.1:7894`，经该代理连接 DeepSeek 时 TLS 握手失败。服务器直连也超时。直接向后端发送“仅回复 OK”，40 秒内只收到 `keep_alive`；`POST /providers/test` 则在约 5 秒后返回 `APIConnectionError`。
+
+同一模型、同一凭据改走服务器已有的带认证 `AI_PROXY` 后，模型接口恢复响应。使用该代理启动独立后端，完整聊天在 4.23 秒内返回 `OK`、`result` 和 `done`。这次诊断没有重启原来的后端，也没有修改模型凭据。
+
+等待期间，SDK 默认最多重试 5 次，外层引擎对连接故障最多尝试 6 轮，轮间还有退避等待。后端每 25 秒发送一次保活心跳，App 收到后刷新连接活跃时间，所以界面可能持续等待数分钟。保活说明流连接仍在，不能证明模型已经开始生成。
+
+修复时要改后端进程实际使用的代理。`AI_PROXY` 是这台服务器已有的变量，OmicsClaw 不会自动把它当作 `HTTPS_PROXY`。确认它已经设置且可用后，在启动后端的终端停止旧进程，再启动：
+
+```bash
+: "${AI_PROXY:?请先设置并验证服务器的出网代理}"
+HTTP_PROXY="$AI_PROXY" HTTPS_PROXY="$AI_PROXY" ALL_PROXY="$AI_PROXY" \
+http_proxy="$AI_PROXY" https_proxy="$AI_PROXY" all_proxy="$AI_PROXY" \
+oc desktop --delta-ring-size 65536 -- --host 127.0.0.1 --port 8765 --abandon-grace 600
+```
+
+保留部署原有的工作区等启动参数。代理含认证信息时，引用已有变量，不把凭据写进命令或日志。启动 shell 已导出的代理变量优先于 `.env`，只改 `.env` 可能无效；已经运行的后端也不会自动读取新的代理设置。重启后在 App 新建会话，先确认普通聊天能完成，再执行分析。
 
 ### App 提示 expected desktop chat SSE v2
 

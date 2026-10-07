@@ -371,7 +371,8 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
   ├─ write_file: analysis/03_clustering/01_cluster.py           ← load_skill + read_input + write_output
   ├─ write_file: analysis/03_clustering/02_validate.py
   ├─ bash: python <skills>/_sdk/notebook/run.py run analysis/03_clustering
-  ├─ bash: ... replay analysis/03_clustering → write_file REPORT → task(module-reviewer) → 用户确认 → accept
+  ├─ bash: ... replay analysis/03_clustering → write_file REPORT → 展示结果
+  └─ 用户点击“独立审查” → task(module-reviewer) → 展示审查意见
 ```
 
 ### 9.1 步骤与执行器
@@ -397,8 +398,8 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
   步骤之前看一遍。
 - 一个步骤过期只看两样：步骤文件变了，或者它经 `read_input` 读过的文件变了。步骤读了又原名写回的文件，按它自己最后写入的
   sha256 比较。`status` 列出每个过期步骤的原因，上游模块重跑后下游模块会显示 `input changed: results/...`。
-- 子命令：`new`、`run`、`status`、`replay`、`accept`、`revise`、`api`、`reference`。验收分三步：`replay` 在新 kernel 里重跑全部步骤；
-  内置的只读子代理 `module-reviewer` 给出 `VERDICT: APPROVE` 或 `REVISE`；用户确认后 `accept` 冻结模块。冻结的模块要先 `revise`
+- 子命令：`new`、`run`、`status`、`replay`、`accept`、`revise`、`api`、`reference`。`replay` 在新 kernel 里重跑全部步骤；
+  校验完成后先展示结果。独立审查默认关闭，桌面端点击对应回复下方的“独立审查”才启动 `module-reviewer`，结论是 `VERDICT: APPROVE` 或 `REVISE`。审查只报告意见，不自动修复或重跑；CLI 和 Channel 在用户明确要求时审查。用户确认后才 `accept` 冻结模块；没有审查时仍需用户明确接受跳过审查。冻结的模块要先 `revise`
   （快照进 `baseline/`）才能再改。`replay` 开始前把 `reviews/` 里已有的审查移进 `reviews/archive/<id>/`，每份的 verdict 和
   sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。重放成功时执行器还写
   `results/<NN>/provenance/review_brief.md`，供审查子代理先读（见 `sub-agent.md` §2.3.1）。重放失败时不留摘要，重放之后 `run` 又跑了步骤时也删掉它，所以磁盘上的摘要总是对应最近一次成功的重放。

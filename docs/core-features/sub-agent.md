@@ -89,9 +89,11 @@ def resolve_tools(self, all_names: Iterable[str]) -> tuple[str, ...]:
 
 ### 2.3.1 内置 `module-reviewer`
 
+独立审查默认关闭。Desktop App 在已完成的助手回复下方显示“独立审查”，点击后开启一个新回合，仅审查所选回复对应的模块。后端按本次请求的 `module_review_requested` 决定是否允许调用 reviewer；没有点击的普通回合拒绝该调用，下一回合也不会继承开启状态。CLI 和 Channel 在用户明确要求时审查。审查意见返回当前会话，修复、重跑和验收仍需另行提出。
+
 `entry/subagent.py` 的 `MODULE_REVIEWER` 是第二个内置子代理（计划 0070），负责在模块重放之后、用户验收之前审查一个分析模块。它的 `tools` 只有 `read_file` 和 `use_skill`：审查者若能改它正在审的模块，审查结论就会失效。代价是它不能列目录、不能 grep，所以 system prompt 让它先读 `results/<NN_slug>/provenance/review_brief.md`。这份摘要由成功的 `replay` 写下，不超过 450 行：每个步骤第一个 cell 的原文与记账里实际调用的 skill 函数对照，读写的文件与大小，日志末尾，validate 步骤还列出它调用的检查函数和各自断言什么；每张文本表的形状与前几行，小表给全文；全部输出文件的大小；changed 与 orphan 输出。读完摘要，它整份读步骤文件、模块 README 和 REPORT，其余文件只在某项检查还没定论时分段读（`start_line`、`end_line`）。h5ad 和图片看摘要里的大小和 validate 步骤的断言，`notebooks/` 不必读，它重复的是步骤文件和输出。没有摘要时它从 `results/<NN_slug>/provenance/manifest.json` 读起。计划 0071 加摘要，是因为 0070 的端到端里审查者逐个读 manifest、记账、notebook 和整张大表，一次审查要 4 到 6 分钟。
 
-它逐项核对：步骤的输入来自 `data/` 或上游模块的 `intermediate/`、`tables/`，skill 没给定的取值都写了理由，步骤第一个 cell 声称调用的 skill 函数与 manifest 记录的一致；validate 步骤检查了 REPORT 依赖的输出；REPORT 里的数字能在表格或日志里找到、引用的图存在且不在 `orphan_outputs` 里、带免责声明；重放成功并覆盖当前的步骤文件。回复第一行必须是 `VERDICT: APPROVE` 或 `VERDICT: REVISE`，主 agent 把回复原文存进 `results/<NN_slug>/reviews/<日期>_review.md`，`accept --review` 解析的就是这一行。下一次 `replay` 会把这份审查移进 `reviews/archive/<id>/`，verdict 和 sha256 记进 manifest 的 `review_history`。
+它逐项核对：步骤的输入来自 `data/` 或上游模块的 `intermediate/`、`tables/`，skill 没给定的取值都写了理由，步骤第一个 cell 声称调用的 skill 函数与 manifest 记录的一致；validate 步骤检查了 REPORT 依赖的输出；REPORT 里的数字能在表格或日志里找到、引用的图存在且不在 `orphan_outputs` 里、带免责声明；重放成功并覆盖当前的步骤文件。回复第一行必须是 `VERDICT: APPROVE` 或 `VERDICT: REVISE`。调用 `task(review_module=...)` 后，框架把回复原文存进 `results/<NN_slug>/reviews/task-review-*.md`，同时保存绑定本次 replay 与被审文件的 JSON receipt，`accept --review` 检查它们。下一次 `replay` 会把这份审查移进 `reviews/archive/<id>/`，verdict 和 sha256 记进 manifest 的 `review_history`。
 
 两个内置子代理都可以被 `.omicsclaw/agents/` 下同名的文件原位替换（§2.5）。
 

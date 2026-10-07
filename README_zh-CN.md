@@ -112,6 +112,9 @@ conda run -n OmicsClaw python -c "import sys; print(sys.executable)"
 可以在 App 的 Providers 页面修改，后端重启后生效。排障见 [App 指南](docs/ecosystem/omicsclaw-app.mdx)，
 HTTP 接口约定见 [`docs/core-features/surfaces.md`](docs/core-features/surfaces.md) 第 8 节。
 
+模块独立审查默认关闭。回复完成后，点击下方的“独立审查”即可审查该回复对应的分析，意见会回到当前
+会话。点击只开启这一次审查，后续分析仍默认关闭。使用此功能需同时更新 App 和后端。
+
 ## 安装
 
 | 方式 | 命令 | 覆盖范围 |

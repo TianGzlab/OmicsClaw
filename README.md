@@ -126,6 +126,12 @@ page can edit; a change takes effect when the backend restarts. Troubleshooting
 is in the [App guide](docs/ecosystem/omicsclaw-app.mdx), and the HTTP contract
 in [`docs/core-features/surfaces.md`](docs/core-features/surfaces.md) §8.
 
+Independent module review is off by default. After a reply finishes, click
+**Independent review** below it to review that reply's analysis and return
+the findings in the same conversation. The click applies only to that review;
+it does not enable reviews for later analyses. Update both the App and backend
+to use this control.
+
 ## Installation
 
 | Method | Command | Covers |
