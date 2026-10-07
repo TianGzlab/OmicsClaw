@@ -14,6 +14,10 @@ class RequestDeadline:
 
     @asynccontextmanager
     async def wait(self):
+        if asyncio.get_running_loop().time() >= self.at:
+            raise ProviderDeadlineExceeded(
+                f"request deadline exceeded ({self.seconds:g}s)", provider=self.provider,
+            )
         timer = asyncio.timeout_at(self.at)
         try:
             async with timer:

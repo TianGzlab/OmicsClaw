@@ -71,6 +71,39 @@ def test_a_dribbling_response_cannot_outlive_the_request_deadline(tmp_path, monk
     asyncio.run(drive())
 
 
+def test_buffered_stream_chunks_do_not_bypass_the_deadline(tmp_path, monkeypatch):
+    class BufferedStream:
+        async def __aiter__(self):
+            stop = asyncio.get_running_loop().time() + 0.15
+            while asyncio.get_running_loop().time() < stop:
+                # An SDK can drain already-buffered keepalives without suspending.
+                yield {"choices": []}
+
+        async def close(self):
+            pass
+
+    async def create(**kwargs):
+        return BufferedStream()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(
+        AsyncOpenAI=lambda **kwargs: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        Timeout=lambda *args, **kwargs: None,
+    ))
+    provider = OpenAIProvider(ProviderConfig(provider="openai", model="test", timeout_seconds=0.05))
+
+    async def drive():
+        app = attach_sessions(build_app(AppConfig(workspace=tmp_path, memory=False), provider=provider, tools=[]))
+        try:
+            handle = await app.sessions.submit("buffered", "hi")
+            await asyncio.wait_for(handle.wait(), 1)
+            assert handle.terminal == "failed"
+            assert "deadline" in str(handle.error).lower()
+        finally:
+            await app.aclose()
+
+    asyncio.run(drive())
+
+
 @pytest.mark.parametrize("backend", ["openai", "anthropic"])
 @pytest.mark.parametrize("streaming", [False, True])
 def test_waiting_for_the_first_response_has_a_deadline(tmp_path, monkeypatch, backend, streaming):

@@ -143,3 +143,23 @@ sc-multi-count、scatac-preprocessing 完成 API、CLI、示例及输出文档�
 最后明确接受的独立模型 turn 在约第 6 秒成功执行 accept，此后 provider 的收尾回复未返回。等候共 397 秒后，只对该验证驱动进程发送 SIGINT，finally 保留 trace，退出码 130，无残留驱动或 R 进程；未中断其他任务或更改已验收输出。这一回合至少完成一次产生工具调用的模型响应，完整请求数、engine outcome 和 token usage 未知，不记为零或 converged。总计至少 104 次已完成主模型调用；已观测的回合耗时合计 2,225 秒，不含回合间停顿及独立副本检查。六次审查共 815.32 秒。`accept-interruption.json` 保留这项限制，六项功能验收不依赖缺失的最终自然语言回复。
 
 外部待验仍为真实 GitHub Actions 首跑和只读容器/sandbox；本次未推送代码、创建 PR 或更改远端 required checks。缺包和缺数据库的科学后端仍按各期列为未验证，没有用协议测试替代真实算法验证。
+
+## 交付后的 CI 与环境核验（2026-10-07）
+
+上述本地交付之后，`57ad6d83` 已按用户要求推送至 `origin/main`。
+[首轮 Eval CI](https://github.com/zhou-1314/OmicsClaw/actions/runs/37590039984)
+的普通技能示例和扩展 CPU 示例均通过；单元测试为 7072 passed、2 failed，
+scripted eval 因依赖单元测试而跳过。两项失败是依赖 fallback 名单未更新、
+Scanpy 替身没有覆盖整段测试执行。本轮 reliability 分支已修正这两项，
+并明确终端测试的 `TERM=xterm`，保留专门的 dumb-terminal 测试。
+
+本机没有 Docker 或 Podman，仍不能声称已完成真实只读容器验收。
+对 `OmicsClaw` 基础环境的只读检查确认 MAST、scds、GSVA、AUCell、
+slingshot、monocle3、scTenifoldKnk 不可加载；DoubletFinder、scDblFinder、
+clusterProfiler、Seurat 可加载。Python 包发现检查没有找到 pertpy、
+pyscenic、memento；pertpy 的已通过证据来自前文记录的独立 overlay，
+不表示基础环境装有它。本轮没有安装或升级科学后端。
+
+请求期限和审核原文自动归档的后续实现见
+[`FRAMEWORK-REBUILD.md`](../FRAMEWORK-REBUILD.md)。这次测试没有重新运行
+M9 的付费模型验收，不能把离线回归说成新的一轮真实模型验证。
