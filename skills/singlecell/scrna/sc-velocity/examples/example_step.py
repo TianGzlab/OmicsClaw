@@ -5,14 +5,30 @@
 # %%
 import numpy as np
 import scanpy as sc
+import pandas as pd
 from scipy import sparse
+from scipy.stats import spearmanr
 from skills._sdk.notebook import load_demo, load_skill, write_output
 
 velocity = load_skill("sc-velocity")
-adata = velocity.velocity(load_demo("velocity_simulation"), n_jobs=1, random_state=0)
+source = load_demo("velocity_simulation")
+source_genes = source.var_names.copy()
+# The simulator's spliced-RNA derivative is beta * unspliced - gamma * spliced.
+true_velocity = (source.layers["unspliced"] * source.var["true_beta"].to_numpy()
+                 - source.layers["spliced"] * source.var["true_gamma"].to_numpy())
+adata = velocity.velocity(source, n_jobs=1, random_state=0)
 sc.tl.umap(adata, random_state=0)
 
 # %%
+truth = true_velocity[:, source_genes.get_indexer(adata.var_names)]
+correlations = np.array([spearmanr(truth[:, i], adata.layers["velocity"][:, i]).statistic
+                         for i in range(adata.n_vars)])
+# This checks orientation on this synthetic screen, not biological fit accuracy.
+assert np.isfinite(correlations).all(), "simulation kinetics: undefined direction correlation"
+assert np.median(correlations) > 0.5, "simulation kinetics: velocity direction is wrong"
+assert np.mean(correlations > 0) >= 0.75, "simulation kinetics: too many reversed gene velocities"
+write_output(pd.DataFrame({"gene": adata.var_names, "direction_spearman": correlations}),
+             "tables/kinetic_direction.csv")
 write_output(velocity.velocity_summary(adata), "tables/velocity_summary.csv")
 write_output(velocity.top_velocity_genes(adata), "tables/top_velocity_genes.csv")
 write_output(velocity.stream_figure(adata), "figures/velocity_stream.png")

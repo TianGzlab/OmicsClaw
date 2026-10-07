@@ -44,6 +44,7 @@ class Case:
     Exclusion keys name a snapshot file, ``file.csv:column``, a
     ``summary.json:key.path`` or ``figures/filename``. An input writer
     receives a Path and writes one reproducible .h5ad there.
+    Environment entries override inherited values; None removes a variable.
     """
 
     args: tuple[str, ...]

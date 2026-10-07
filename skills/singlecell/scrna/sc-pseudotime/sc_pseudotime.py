@@ -888,6 +888,7 @@ def main() -> None:
     )
     store_analysis_metadata(working, SKILL_NAME, method, params)
     output_h5ad = output_dir / "processed.h5ad"
+    library.run_info(working, keep=False)
     save_h5ad(working, output_h5ad)
     logger.info("Saved processed object to %s", output_h5ad)
 

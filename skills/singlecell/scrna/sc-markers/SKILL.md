@@ -88,8 +88,10 @@ Otherwise logfoldchanges is the effect when available, falling back to scores.
 
 Return n_markers, top_gene, top_effect, median_effect and effect_metric per group.
 
-The top gene uses the same ordering as top_markers. Effect statistics use
-all returned markers in the group.
+The top gene uses the same ordering as top_markers. top_effect is the
+group's maximum effect, not necessarily that gene's effect. Use a row
+from top_markers when reporting a gene together with its effect size.
+Effect statistics use all returned markers in the group.
 
 ### `marker_dotplot_figure(adata, table: pd.DataFrame, *, groupby: str, n_top: int=5)`
 
@@ -118,6 +120,9 @@ use their log-normalized matrix; their X is scaled.
 
 ## Gotchas
 
+- In `tables/cluster_summary.csv`, `top_effect` is the group's maximum, not
+  necessarily the effect of `top_gene`. Use the same row from `top_markers`
+  for a gene and its effect size (`_api.py:132`, `cluster_summary`).
 - `run_info(table)["filter_fallback"]` is true when post-filtering failed or
   removed every row. The function then returns the unfiltered ranking, as the
   CLI did previously; read `fallback_reason` before interpreting the table.

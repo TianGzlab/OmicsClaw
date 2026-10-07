@@ -791,6 +791,7 @@ def main():
         raw_kind="raw_counts_snapshot",
     )
     output_h5ad = output_dir / "processed.h5ad"
+    library.run_info(adata, keep=False)
     save_h5ad(adata, output_h5ad)
     alias_paths = write_h5ad_aliases(output_h5ad, [output_dir / "adata_with_velocity.h5ad"])
     logger.info(f"Saved: {output_h5ad}")

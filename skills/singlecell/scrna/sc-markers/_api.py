@@ -132,8 +132,10 @@ def top_markers(table: pd.DataFrame, *, n_top: int = 10) -> pd.DataFrame:
 def cluster_summary(table: pd.DataFrame) -> pd.DataFrame:
     """Return n_markers, top_gene, top_effect, median_effect and effect_metric per group.
 
-    The top gene uses the same ordering as top_markers. Effect statistics use
-    all returned markers in the group.
+    The top gene uses the same ordering as top_markers. top_effect is the
+    group's maximum effect, not necessarily that gene's effect. Use a row
+    from top_markers when reporting a gene together with its effect size.
+    Effect statistics use all returned markers in the group.
     """
     if table.empty:
         return pd.DataFrame()

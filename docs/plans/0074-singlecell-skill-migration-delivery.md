@@ -103,9 +103,13 @@ sc-multi-count、scatac-preprocessing 完成 API、CLI、示例及输出文档�
 
 框架回归为 5,783 passed、16 skipped、3 xfailed、2 failed（163.21 秒）。两条失败是 `tests/entry/test_cli_activity.py` 的 `test_c1_controls_and_format_characters_never_reach_the_terminal` 和 `test_what_a_tool_says_survives_its_own_tool_start`；在干净基准 worktree `/tmp/omicsclaw-0074-baseline.67pGE6` 上同样失败，未用本次变更掩盖。GUARDS 整组为 821 passed、7 skipped、1 xpassed（125.39 秒）；其中新增诊断测试在没有 Scanpy 的轻框架环境跳过，在科学环境和轻 CI 单独实跑。审核后真实 R/MAST/步骤测试 33 passed（71.67 秒）。
 
-首轮全量基础环境 parity 为 90 passed、10 failed。六项失败是新增防线发现原 API 比较没有实际数值：standardize、ambient 补上与旧 CLI 摘要的数值核对，in-silico 按基因对齐真实分数后，六项全部通过（18.64 秒）。另外四项源于基线线程环境未固定：Harmony 原录制脚本设置五种线程变量为 1；DoubletDetection 原基线没有四种线程覆盖。对同一 PBMC 输入，旧、新 DoubletDetection 在无覆盖时各两次均为 37 个双细胞、所有表格 exact 相等；线程数为 2 时旧、新均为 41，表格也 exact 相等。旧代码自己即可重现 2,687 个分数和六个分类的差异，不能把它算成迁移数值回归。现在 CLI/API 共用各用例明确声明的环境，新录制 metadata 记录线程值；没有改写旧 golden。相关重跑结果待收齐。
+首轮全量基础环境 parity 为 90 passed、10 failed。六项失败是新增防线发现原 API 比较没有实际数值：standardize、ambient 补上与旧 CLI 摘要的数值核对，in-silico 按基因对齐真实分数后，六项全部通过（18.64 秒）。另外四项源于基线线程环境未固定：Harmony 原录制脚本设置五种线程变量为 1；DoubletDetection 原基线没有四种线程覆盖。对同一 PBMC 输入，旧、新 DoubletDetection 在无覆盖时各两次均为 37 个双细胞、所有表格 exact 相等；线程数为 2 时旧、新均为 41，表格也 exact 相等。旧代码自己即可重现 2,687 个分数和六个分类的差异，不能把它算成迁移数值回归。现在 CLI/API 共用各用例明确声明的环境，新录制 metadata 记录线程值；没有改写旧 golden。
 
-本节原始日志集中在 `/tmp/omicsclaw-0074-final.nBqCmC/`。变更过的 clustering、pathway、gene-programs、multi-count、ATAC 的 20 项 parity 已再次通过（169.82 秒）；pertpy/prep 八项通过（34.04 秒），velocity 四项通过（58.96 秒）。
+四项线程环境重跑全部通过（84.58 秒）；加上首轮 90 项、六项比较修复和 overlay 八项，108 项主 parity 都已有通过结果，分批覆盖，不是声称一次全绿。另八项按基因键的数值对照通过（43.82 秒）。没有改写旧 golden。
+
+本节原始日志集中在 `/tmp/omicsclaw-0074-final.nBqCmC/`。变更过的 clustering、pathway、gene-programs、multi-count、ATAC 的 20 项 parity 已再次通过（169.82 秒）；pertpy/prep 八项通过（34.04 秒），velocity 四项通过（58.96 秒）。脚本化 eval 为 29 passed（26.82 秒），notebook 非示例、非诊断测试为 262 passed（46.54 秒）。
+
+第二轮独立审核的剩余诊断清理和新增 velocity 方向检查已修复，等待最后复查。三个真实 CLI 的内部诊断清理回归先 3 failed、后 3 passed（37.39 秒）。velocity 的已知方向检查及反向速度拒绝测试通过；撤去方向检查后，反向测试确实失败，恢复后两项再通过（33.36 秒）。真实端到端两次混淆 `cluster_summary.top_gene` 与 `top_effect`，因此补清它们不是同一基因/效应对的文档，未改算法和表结构。全域 help 探针和独立工作目录调用为 11 passed（59.40 秒）。
 
 ## M9：真实模型验收进行中
 

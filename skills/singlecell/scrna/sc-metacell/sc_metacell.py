@@ -357,7 +357,7 @@ def main() -> int:
         min_iter=args.min_iter, max_iter=args.max_iter, celltype_key=args.celltype_key,
         n_neighbors=args.n_neighbors, n_pcs=args.n_pcs, random_state=args.seed,
     )
-    method_info = library.run_info(madata)
+    method_info = library.run_info(madata, keep=False)
     executed = args.method = method_info["executed_method"]
     if method_info["fallback_reason"]:
         logger.warning(method_info["fallback_reason"])

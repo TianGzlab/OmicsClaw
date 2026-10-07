@@ -53,3 +53,23 @@ def test_the_example_step_runs(example, tmp_path):
     calls = [c for c in runs[-1].skill_calls if c["skill"] == skill]
     assert calls, f"the example made no recorded call to {skill}"
     assert runs[-1].skill_loads[0]["stub"] is False
+
+
+def test_velocity_example_rejects_reversed_kinetics(tmp_path):
+    """A fitted but sign-reversed result must fail the known-direction check."""
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    env.pop("OMICSCLAW_SKILL_STUBS", None)
+    env.pop("NUMBA_DISABLE_JIT", None)
+    new = subprocess.run([sys.executable, str(RUN), "new", "velocity_mutation"], cwd=tmp_path, env=env,
+                         capture_output=True, text=True, timeout=120)
+    assert new.returncode == 0, new.stdout + new.stderr
+    source = REPO / "skills/singlecell/scrna/sc-velocity/examples/example_step.py"
+    text = source.read_text()
+    anchor = "sc.tl.umap(adata, random_state=0)"
+    assert text.count(anchor) == 1
+    mutant = text.replace(anchor, 'adata.layers["velocity"] *= -1\n' + anchor)
+    (tmp_path / "analysis/01_velocity_mutation/01_reversed.py").write_text(mutant)
+    run = subprocess.run([sys.executable, str(RUN), "run", "analysis/01_velocity_mutation"],
+                         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=180)
+    assert run.returncode != 0, "the example accepted reversed simulated velocities"
+    assert "simulation kinetics: velocity direction is wrong" in run.stdout + run.stderr

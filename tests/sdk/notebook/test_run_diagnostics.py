@@ -53,3 +53,24 @@ def test_result_table_diagnostics_follow_the_same_keep_contract(skill, key):
     assert key in data.attrs
     assert api.run_info(data, keep=False) == {"method": "recorded"}
     assert key not in data.attrs and api.run_info(data) == {}
+
+
+@pytest.mark.slow
+@pytest.mark.cli_subprocess
+@pytest.mark.parametrize("skill,relative,key", [
+    ("sc-velocity", "processed.h5ad", "omicsclaw_sc_velocity_run"),
+    ("sc-pseudotime", "processed.h5ad", "omicsclaw_sc_pseudotime_run"),
+    ("sc-metacell", "tables/metacells.h5ad", "omicsclaw_sc_metacell_run"),
+])
+def test_cli_h5ad_does_not_retain_library_diagnostics(skill, relative, key, tmp_path):
+    from tests.parity import snapshot
+    if skill == "sc-velocity":
+        pytest.importorskip("scvelo")
+    output = tmp_path / "output"
+    result = snapshot.run_cli(skill, "default", output)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    data = ad.read_h5ad(output / relative, backed="r")
+    try:
+        assert key not in data.uns
+    finally:
+        data.file.close()
