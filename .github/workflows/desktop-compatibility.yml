@@ -1,0 +1,80 @@
+name: Desktop compatibility
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-v3-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e . pytest fastapi uvicorn httpx
+      - run: python -m pytest tests/entry/test_desktop_v3_consumer.py tests/entry/test_desktop_http.py -q -o addopts=''
+
+  private-app-pairing:
+    # Private source is available only to reviewed main or an explicit main run.
+    # Fork/PR code never shares a runner with App source or its checkout token.
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
+    needs: public-v3-consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: backend
+          persist-credentials: false
+      - name: Require access to the private App source
+        env:
+          APP_REPO_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        run: |
+          test -n "$APP_REPO_TOKEN" || { echo 'APP_REPO_TOKEN must have read access to zhou-1314/OmicsClaw-App'; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          repository: zhou-1314/OmicsClaw-App
+          ref: main
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pip install -e ./backend pytest fastapi uvicorn httpx
+      - name: Require the App pairing runner
+        run: test -f app/scripts/test-desktop-compatibility.mjs
+      - name: Install the private App dependencies
+        working-directory: app
+        run: |
+          if ! npm ci > "$RUNNER_TEMP/app-install.log" 2>&1; then
+            echo 'Private App dependency installation failed; rerun in the private App repository for diagnostics.'
+            exit 1
+          fi
+      - name: Check both clients without publishing private diagnostics
+        working-directory: app
+        env:
+          OMICSCLAW_COMPAT_BACKEND: ${{ github.workspace }}/backend
+        run: |
+          echo "Backend source $(git -C ../backend rev-parse HEAD)"
+          echo "App source $(git rev-parse HEAD)"
+          if ! npm run test:desktop-compat > "$RUNNER_TEMP/app-compatibility.log" 2>&1; then
+            echo 'Desktop pairing failed. Reproduce with these source revisions in the private App repository; detailed logs can include private source and are withheld here.'
+            exit 1
+          fi
+          grep -E '^PASS actual App proxy: (hello|approval|abort)$' "$RUNNER_TEMP/app-compatibility.log"
+      # The ephemeral logs are never uploaded to this public repository.

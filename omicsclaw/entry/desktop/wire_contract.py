@@ -6,10 +6,11 @@ The backend serves two kinds of route.
 body and SSE frames), ``POST /chat/permission``, ``POST /chat/abort``,
 ``POST /chat/session-permission-profile``, ``GET``/``PUT /workspace``,
 ``GET /env/doctor`` and ``GET /health``. The backend defines this
-contract and the desktop client implements the version it names. Any
-change to a field of those requests, responses or frames bumps the
-matching version number, and the client refuses a backend whose versions
-it does not implement.
+contract and the desktop client implements the major version it names.
+Optional fields and capability declarations are additive within v3. Removing
+a field, changing its meaning or type, or requiring new client behavior
+bumps the matching major version. Clients ignore fields they do not use
+and refuse major versions they do not implement.
 
 **Management routes**, released with the package version and not covered
 by these numbers: ``GET /skills``, ``GET /skills/{domain}/{name}``,
@@ -49,6 +50,12 @@ from ._chat_sse import CHAT_SSE_MAX_FRAME_BYTES
 DESKTOP_CHAT_REQUEST_SCHEMA_VERSION: Final = 3
 DESKTOP_CHAT_SSE_SCHEMA_VERSION: Final = 3
 DESKTOP_CHAT_INTERRUPT_SCHEMA_VERSION: Final = 1
+
+
+DESKTOP_CAPABILITIES: Final = {
+    "files_tree": True,
+    "files_serve": True,
+}
 
 
 SERVED_PATHS: Final[tuple[str, ...]] = (
@@ -106,6 +113,7 @@ def desktop_chat_contract(
 
 
 __all__ = [
+    "DESKTOP_CAPABILITIES",
     "DESKTOP_CHAT_INTERRUPT_SCHEMA_VERSION",
     "DESKTOP_CHAT_REQUEST_SCHEMA_VERSION",
     "DESKTOP_CHAT_SSE_SCHEMA_VERSION",

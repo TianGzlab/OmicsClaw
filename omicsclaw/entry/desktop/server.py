@@ -74,7 +74,7 @@ from omicsclaw.entry.session import (
 )
 from omicsclaw.entry.stream import ObserverCapacityError, TurnObservation
 from omicsclaw.entry.turn import TurnHandle
-from omicsclaw.version import __version__
+from omicsclaw.version import __version__, build_identity
 
 from .catalog import mcp_servers, skill_catalog, skill_detail
 from .doctor import doctor_report, effective_model
@@ -102,7 +102,7 @@ from .turn_submission import (
     decode_chat_stream_request,
     parse_chat_stream_document,
 )
-from .wire_contract import SERVED_PATHS, desktop_chat_contract
+from .wire_contract import DESKTOP_CAPABILITIES, SERVED_PATHS, desktop_chat_contract
 
 __all__ = [
     "BACKEND_PROCESS_EPOCH",
@@ -367,6 +367,8 @@ def health_payload(app: AgentApp) -> dict[str, Any]:
         "status": "ok",
         "version": __version__,
         "backend_process_epoch": BACKEND_PROCESS_EPOCH,
+        "capabilities": dict(DESKTOP_CAPABILITIES),
+        "build": dict(build_identity()),
         "provider": app.provider.name,
         "model": effective_model(app),
         "skills_count": len(app.skills.skills),

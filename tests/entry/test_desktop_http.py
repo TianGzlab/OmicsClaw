@@ -945,3 +945,15 @@ def test_a_real_server_resumes_a_dropped_stream_from_its_last_id(
     assert joined == "first second"
     assert [f["type"] for _, f in tail[-2:]] == ["result", "done"]
     assert [event_id for event_id, _ in tail[-2:]] == [None, None]
+
+
+def test_health_advertises_optional_capabilities_without_changing_v3(tmp_path):
+    payload = client(tmp_path).get('/health').json()
+    assert payload['capabilities'] == {
+        'files_tree': True,
+        'files_serve': True,
+    }
+    assert payload['contracts']['desktop_chat']['request_schema_version'] == 3
+    assert payload['contracts']['desktop_chat']['sse_schema_version'] == 3
+    assert 'commit' in payload['build']
+    assert 'dirty' in payload['build']

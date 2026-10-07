@@ -201,7 +201,7 @@ Broker 只记录工具名、请求 id 与结果，从不记参数。
 
 客户端是另一个项目 OmicsClaw-App（Electron + Next.js），它的 Next 服务端把请求转发到本后端。
 **线协议由后端定义并版本化**（`wire_contract.py`，plan 0064）：App 只实现 `/health` 公布的那个版本，版本不符时两边都显式拒绝。
-字段变更要同时做三件事：版本号加 1、两个仓库同批改、在计划里记录。
+可选字段按 v3 增量扩展；只有破坏兼容的改动才升主版本，并协调两个仓库、在计划里记录。
 
 ### 8.1 启动
 
@@ -251,6 +251,8 @@ token 只从环境读，不设 flag（命令行上的密钥会出现在进程列
 | `POST /chat/title` | 为会话的第一条消息生成标题（管理路由） |
 | `GET /files/tree` | 工作区的文件树，只读 |
 | `GET /files/serve` | 工作区里的一个文件，只读，支持单段 `Range` |
+
+Desktop 聊天协议的主版本保持 v3（中断请求仍为 v1）。新增可选字段或能力声明无需升主版本；客户端忽略未使用的字段。删除字段、改变类型或语义、要求旧客户端发送新字段时，才需要协调主版本升级。算法、技能或后端包版本变化不代表 Desktop 协议变化。既有 v2 安装包仍会拒绝 v3，需要先更换客户端。
 
 管理路由与两条文件路由不纳入 `desktop_chat` 的版本号，随包版本发布；与其他路由一样需要 bearer（配置了 token 时）。
 
@@ -413,6 +415,19 @@ zhipu 行在没有任何设置时为预设的 `"https://open.bigmodel.cn/api/paa
 ```
 
 `abandon_grace_s` 是生效的宽限期（`--abandon-grace` 的值，没给时 30），registry 不取消无人观察的 exchange 时为 `null`；它是进程的事实，不属于线协议，不计入版本号。
+
+认证后的 `/health` 另有两个可选顶层对象：
+
+```json
+{"capabilities": {"files_tree": true, "files_serve": true},
+ "build": {"commit": "<40-character git commit>", "dirty": false}}
+```
+
+`files_tree` 控制远程文件树，`files_serve` 控制预览、图像与原始文件读取。App 在请求文件前向同一个目标检查能力；显式关闭或在能力对象中省略某项时，入口返回 `409 file_capability_unavailable`，文件树和预览显示说明。未知能力名称不影响连接。既有 v3 后端完全没有 `capabilities` 时，保留当时两条文件路由均可用的行为。续流仍是 v3 的既有行为，本次没有把它改成可选能力。
+
+源码运行的 `build.commit` 是启动进程所见的 Git 提交，`dirty` 包含未忽略的新文件；无 Git 源码（例如 wheel 安装）返回 `null`。此信息是诊断身份，不是签名或软件包真实性证明。未认证的健康响应不带这些数据。
+
+`.github/workflows/desktop-compatibility.yml` 的公开 v3 消费测试用真实 HTTP 执行聊天、审批和停止，不依赖 App 源码。受信任的 main push 或 main 手动运行另用 `APP_REPO_TOKEN` 读取私有 App，并执行其固定旧客户端与当前客户端的实际代理测试；普通 PR 不读取私有源码。仓库管理员需将公开消费检查设为合并必需项，并在发布前确认对应后端 SHA 的私有配对成功。工作流文件不会自动设置分支保护。
 
 设置了 token 而请求未带 `Authorization` 时返回精简版 `unauthenticated_health_payload`。
 

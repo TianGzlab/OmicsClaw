@@ -377,3 +377,31 @@ def test_building_the_http_app_needs_fastapi_and_says_so():
             create_desktop_app(object())  # type: ignore[arg-type]
     else:  # pragma: no cover - not this machine
         pytest.skip("fastapi is installed here; see test_desktop_http.py")
+
+
+
+def test_source_build_identity_includes_untracked_runtime_files(tmp_path):
+    import runpy
+    import shutil
+    import subprocess
+    from omicsclaw import version
+
+    root = tmp_path / 'source'
+    module = root / 'omicsclaw' / 'version.py'
+    module.parent.mkdir(parents=True)
+    shutil.copyfile(version.__file__, module)
+
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=root, stderr=subprocess.DEVNULL)
+
+    git('init')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Test')
+    git('add', 'omicsclaw/version.py')
+    git('commit', '-m', 'test fixture')
+    clean = runpy.run_path(str(module))['build_identity']()
+    assert clean['commit'] == git('rev-parse', 'HEAD').decode().strip()
+    assert clean['dirty'] is False
+    (module.parent / 'new_runtime.py').write_text('value = 1')
+    changed = runpy.run_path(str(module))['build_identity']()
+    assert changed == {'commit': clean['commit'], 'dirty': True}
