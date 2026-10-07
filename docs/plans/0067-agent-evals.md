@@ -881,5 +881,5 @@ eval.yml 的负向验证只在本地模拟：在最小 venv 里按 job2 的步�
 ### 9.4 未做与待 owner 决定
 
 - Q11 的两件对外动作没有做，等 owner 同意：故意改坏一条用例的草稿 PR（看 job2 变红与 Step Summary），以及给已知失败开 `needs-triage` issue（`zhou-1314/OmicsClaw`，label 缺了要新建）。
-- 两个 job 在真实 GitHub Actions 上是否全绿还没验证，要等第一次推送。白名单目录在 CI 模拟 venv 里只跑了已知失败涉及的文件，没有整体跑一遍（全量白名单只允许在 E-D0 跑一次）。
-- 偏差 10：owner 2026-09-30 接受两条非 strict 的 `env` 条目。偏差 11：`desktop-http` job 已删除。Q11 的两件对外动作 owner 决定暂不做，真实 GitHub Actions 尚未验证。
+- 真实 GitHub Actions 已验证（2026-10-07 用 `gh run list --workflow eval.yml` 核对）：PR #39、#40、#41 各自的最后一次 Eval CI 运行和它们合并后 main 上的三次 push 运行都是 success。#39、#40 中途各有一次失败的运行，后续提交已修好。白名单目录在 CI 模拟 venv 里只跑了已知失败涉及的文件，没有整体跑一遍（全量白名单只允许在 E-D0 跑一次）。
+- 偏差 10：owner 2026-09-30 接受两条非 strict 的 `env` 条目。偏差 11：`desktop-http` job 已删除。Q11 的两件对外动作 owner 决定暂不做。真实 GitHub Actions 的结果见本节第二条。

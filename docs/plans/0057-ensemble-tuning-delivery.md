@@ -3,6 +3,8 @@
 **规格**：`docs/plans/0057-ensemble-tuning.md` 第 3.1 版，另加 owner 于 2026-09-27 作出的裁定 N1–N4。本记录不改动计划正文。
 **状态**：T0–T11 已实施。T10 完成到第 4 步：开发报告已写好，`freeze.json`、冻结附录和环境锁定已生成，owner 签字栏留空。开发阶段的结果见 `docs/plans/0057-dev-report.md`。T12 留出集已于 2026-09-28 跑完，42 个单元每个 13 步；收尾分析在 2026-09-30 完成，报告见 `docs/plans/0057-holdout-report.md`，DLPFC 上的无效停止线没有触发，J1 判读句触发。
 
+**2026-10-07 补记**：ensemble 层已于 2026-10-02 删除，代码存档在 tag `archive/ensemble-before-removal`。本计划已被取代，不再实施或维护。
+
 ## 1. 落点
 
 | 步骤 | 内容 | 文件 |

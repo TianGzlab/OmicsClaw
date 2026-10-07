@@ -2,7 +2,7 @@
 
 重建的第 7 步。对标 harness9 的 `internal/memory` 与 `internal/ltm` 两个包。
 
-状态：计划。上游 `omicsclaw/entry/` 已就绪，本层是纯增量，只新建
+状态：已交付（2026-10-07 核对），计划 0040 已把本层接进 agent 主循环。以下是写计划时的情况：上游 `omicsclaw/entry/` 已就绪，本层是纯增量，只新建
 `omicsclaw/memory/` 与 `tests/memory/`。
 
 ## 1. 为什么现在能做

@@ -550,7 +550,7 @@ async def _blocking_turn(self, msgs, tools, out: _TurnOutcome) -> AsyncIterator[
 
 ## 12. 引擎层终态 —— 对照 harness9 `agent-loop.md`
 
-**状态：已起草，未实现**（2026-09-20）。owner 裁定见本文档头部「第二纪元」：
+**状态：已交付**（2026-09-21，结果见 §12.11）。2026-10-07 更正：此处原写「已起草，未实现」（2026-09-20），交付后没有更新。owner 裁定见本文档头部「第二纪元」：
 引擎应当采取 harness9 `docs/核心功能/agent-loop.md` 那一套设计，自持
 workDir / Session / PromptBuilder / PlanStore / 审批事件。
 

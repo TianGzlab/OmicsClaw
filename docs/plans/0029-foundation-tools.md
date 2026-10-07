@@ -4,7 +4,7 @@
 （`omicsclaw/tools/`，计划 0028）交付了注册表、适配器与 3 个参考工具；
 本步在它上面建**真正干活的基础工具**。
 
-状态：**待审核**。独立子 agent 审核 → owner 审核 → 再决定执行。
+状态：**已交付**（2026-10-07 核对）。`omicsclaw/tools/builtin/` 已有 `read_file`、`write_file`、`edit_file`、`bash`，见 CHANGELOG 的 Step 4.5 条目。原状态「待审核」写于交付之前。
 
 ---
 

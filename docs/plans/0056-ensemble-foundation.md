@@ -2,6 +2,8 @@
 
 **状态**：第 2.1 版（2026-09-24），按复审与 owner 裁定局部修订，待 owner 终审；未写任何生产代码。
 
+**2026-10-07 补记**：ensemble 层已于 2026-10-02 删除，代码存档在 tag `archive/ensemble-before-removal`。本计划已被取代，不再实施或维护。
+
 **前置**：无硬前置。依赖已落地的执行器分批（`engine/executor.py`）、`bash` 的沙箱接缝
 （`entry/sandbox.py`）与 skill 索引（`omicsclaw/skills/`）。本计划是 0056–0060 系列的第一份，
 后四份都建立在这里定下的接口上（§3.13）。
