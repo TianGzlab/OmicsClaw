@@ -60,7 +60,7 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
       # scVelo 0.3.4's scalar conversion fails under NumPy 2.4; use the tested version.
-      - run: pip install -e . pytest "numpy==2.0.2" "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat nbclient ipykernel "scanpy[leiden]" umap-learn "harmonypy==0.0.10" "scrublet==0.2.3" "statsmodels==0.14.6" "scvelo==0.3.4"
+      - run: pip install -e . pytest "numpy==2.0.2" "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat nbclient ipykernel "scanpy[leiden]" umap-learn "harmonypy==0.0.10" "scrublet==0.2.3" "statsmodels==0.14.6" "scvelo==0.3.4" "scikit-misc==0.5.2"
       # load_demo looks in OMICSCLAW_DEMO_DIR first; fill it once and keep it between runs.
       - uses: actions/cache@v4
         with:
@@ -114,6 +114,7 @@ jobs:
           skills/singlecell/scrna/sc-multi-count/tests
           skills/singlecell/scatac/scatac-preprocessing/tests
           skills/singlecell/scrna/sc-fastq-qc/tests/test_fastqc_paths.py
+          skills/spatial/spatial-preprocess/tests
           tests/sdk/notebook/test_run_diagnostics.py
           -m "not demo and not slow and not cli_subprocess"
           -p no:cacheprovider

@@ -147,6 +147,12 @@ DEPENDENCIES: dict[str, dict] = {
         "install": "pip install harmonypy",
         "description": "Harmony batch integration",
     },
+    "scikit-misc": {
+        "module": "skmisc",
+        "kind": "pip",
+        "install": "pip install scikit-misc",
+        "description": "LOESS for Scanpy Seurat v3 highly variable genes",
+    },
     "igraph": {
         "module": "igraph",
         "kind": "pip",
@@ -388,6 +394,12 @@ DEPENDENCIES: dict[str, dict] = {
         "kind": "git",
         "install": "pip install git+https://github.com/JEFworks-Lab/STalign.git",
         "description": "Spatial transcriptomics alignment (STalign; GitHub-only)",
+    },
+    "umap-learn": {
+        "module": "umap",
+        "kind": "pip",
+        "install": "pip install umap-learn",
+        "description": "UMAP embedding backend",
     },
     "tangram-sc": {
         "module": "tangram",

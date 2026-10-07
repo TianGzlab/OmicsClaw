@@ -101,7 +101,19 @@ _DRUG_EXPRESSION_RENAME = {
 }
 
 
+def _spatial_input(path: Path) -> None:
+    from scripts.generate_demo_data import generate_demo_visium
+
+    generate_demo_visium().write_h5ad(path)
+
+
 REGISTRY = {
+    'spatial-preprocess': Skill('skills/spatial/spatial-preprocess/spatial_preprocess.py', 'api_spatial_preprocess', {
+        'default': Case((), input=_spatial_input, environment={key: '1' for key in _THREAD_VARIABLES}),
+        'resolution_sweep': Case(('--n-top-hvg', '50', '--n-pcs', '15', '--n-neighbors', '10',
+                                  '--leiden-resolution', '0.8', '--resolutions', '0.4,0.8'),
+                                 input=_spatial_input, environment={key: '1' for key in _THREAD_VARIABLES}),
+    }),
     'sc-perturb-prep': Skill('skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py', 'api_sc_perturb_prep', {
         'default': Case(('--demo',)), 'keep_multi': Case(('--demo', '--keep-multi-guide')),
     }),

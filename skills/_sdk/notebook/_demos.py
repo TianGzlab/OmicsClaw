@@ -6,6 +6,29 @@ records its hash. Keep optional backend imports inside the generator.
 """
 
 
+def spatial_synthetic():
+    """Three spatial stripes with distinct count profiles; not tissue measurements."""
+    import anndata as ad
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(42)
+    coordinates = np.array([(x, y) for x in range(15) for y in range(12)], dtype=float)
+    groups = coordinates[:, 0].astype(int) // 5
+    base = rng.gamma(2, 1, 300)
+    counts = rng.poisson(base, size=(180, 300)).astype("float32")
+    for group in range(3):
+        rows = groups == group
+        counts[rows, group * 30:(group + 1) * 30] += rng.poisson(12, size=(60, 30))
+    data = ad.AnnData(counts)
+    data.obs_names = [f"spot_{index:03d}" for index in range(180)]
+    data.var_names = [f"Gene_{index:03d}" for index in range(295)] + [f"MT-Gene_{index}" for index in range(5)]
+    data.obs["domain_ground_truth"] = pd.Categorical([f"domain_{group}" for group in groups])
+    data.obsm["spatial"] = coordinates
+    data.uns["synthetic"] = True
+    return data
+
+
 def velocity_simulation():
     """Seeded scVelo kinetic simulation with genuine simulated splicing dynamics."""
     import scvelo as scv

@@ -7,6 +7,8 @@ runs this interpreter, so run it where those are installed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -73,3 +75,41 @@ def test_velocity_example_rejects_reversed_kinetics(tmp_path):
                          cwd=tmp_path, env=env, capture_output=True, text=True, timeout=180)
     assert run.returncode != 0, "the example accepted reversed simulated velocities"
     assert "simulation kinetics: velocity direction is wrong" in run.stdout + run.stderr
+
+
+def test_spatial_preprocess_example_replays_in_a_fresh_kernel(tmp_path):
+    example = REPO / "skills/spatial/spatial-preprocess/examples/example_step.py"
+    assert example.is_file()
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "OMP_NUM_THREADS": "1",
+           "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1"}
+    env.pop("OMICSCLAW_SKILL_STUBS", None)
+    env.pop("NUMBA_DISABLE_JIT", None)
+
+    def command(*args):
+        proc = subprocess.run([sys.executable, str(RUN), *args], cwd=tmp_path, env=env,
+                              capture_output=True, text=True, timeout=300)
+        assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-4000:]
+
+    command("new", "spatial")
+    module = tmp_path / "analysis/01_spatial"
+    shutil.copy2(example, module / "01_preprocess.py")
+    (module / "02_validate.py").write_text(
+        "# %%\nfrom skills._sdk.notebook import read_input\n"
+        "data = read_input('results/01_spatial/intermediate/processed.h5ad')\n"
+        "assert data.shape == (180, 300)\n"
+        "assert data.obs['leiden'].nunique() == 3\n"
+        "assert 'counts' in data.layers and 'spatial' in data.obsm\n",
+        encoding="utf-8",
+    )
+    command("run", "analysis/01_spatial")
+    table = tmp_path / "results/01_spatial/tables/cluster_summary.csv"
+    before = hashlib.sha256(table.read_bytes()).hexdigest()
+    command("replay", "analysis/01_spatial")
+    assert hashlib.sha256(table.read_bytes()).hexdigest() == before
+    provenance = tmp_path / "results/01_spatial/provenance"
+    manifest = json.loads((provenance / "manifest.json").read_text())
+    assert manifest["status"] == "replayed" and manifest["replay"]["status"] == "ok"
+    runs = _ledger.runs_of(provenance / "runs", "01_preprocess")
+    assert runs[-1].mode == "replay"
+    assert any(call["skill"] == "spatial-preprocess" for call in runs[-1].skill_calls)
+    assert not runs[-1].skill_loads[0]["stub"]

@@ -57,7 +57,7 @@ def test_the_registry_is_a_literal_equal_to_the_import():
 
 def test_size_keys_and_uniqueness():
     table = deps.DEPENDENCIES
-    assert len(table) == 61
+    assert len(table) == 63
     normalised = [_norm(k) for k in table]
     assert len(set(normalised)) == len(normalised)
     modules = [v["module"] for v in table.values()]

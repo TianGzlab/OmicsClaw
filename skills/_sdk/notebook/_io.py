@@ -23,6 +23,11 @@ from skills._sdk.notebook._layout import MODULE_RE, Module, module_from_name
 from skills._sdk.notebook.contract import ENVIRONMENT, LAYOUT
 
 DEMOS = {
+    "spatial_synthetic": {
+        "files": ["data/spatial_synthetic.h5ad"],
+        "generator": "spatial_synthetic",
+        "about": "180 synthetic spots, 300 count features and three spatial stripes; not biological measurements",
+    },
     "perturbseq_synthetic": {
         "files": ["data/perturbseq_synthetic.h5ad"],
         "generator": "perturbseq_synthetic",

@@ -29,6 +29,21 @@ def _demo(name: str):
     return load_repo_demo_data(name)[0]
 
 
+def api_spatial_preprocess(case: str, *, input_path: Path) -> dict:
+    import anndata as ad
+
+    library = _load("spatial-preprocess")
+    kwargs = {} if case == "default" else {
+        "n_top_hvg": 50, "n_pcs": 15, "n_neighbors": 10,
+        "leiden_resolution": 0.8, "resolutions": [0.4, 0.8],
+    }
+    adata = library.preprocess(ad.read_h5ad(input_path), **kwargs)
+    return {"adata": adata, "tables": {
+        "cluster_summary.csv": library.cluster_summary(adata),
+        "pca_variance_ratio.csv": library.pca_variance_table(adata),
+    }}
+
+
 def api_sc_qc(case: str) -> dict:
     qc = _load("sc-qc")
     adata = qc.calculate_qc(_demo("pbmc3k_raw"), species="mouse" if case == "mouse" else "human")

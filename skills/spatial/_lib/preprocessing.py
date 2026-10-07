@@ -22,10 +22,6 @@ import logging
 
 import numpy as np
 
-from skills._sdk.runtime_env import ensure_runtime_cache_dirs
-
-ensure_runtime_cache_dirs()
-
 import scanpy as sc
 
 from .adata_utils import get_spatial_key, store_analysis_metadata
@@ -118,6 +114,7 @@ def preprocess(
     tissue: str | None = None,
     species: str = "human",
     skill_name: str = "spatial-preprocess",
+    random_state: int = 0,
 ) -> tuple:
     """Run the full spatial preprocessing pipeline.
 
@@ -153,6 +150,8 @@ def preprocess(
         Species for MT gene prefix detection ("human" or "mouse").
     skill_name : str
         Name for metadata storage.
+    random_state : int
+        Seed for PCA, neighbors, UMAP and every Leiden resolution (default 0).
 
     Returns
     -------
@@ -255,7 +254,7 @@ def preprocess(
             "Too few observations or HVGs remain to compute PCA (<2 components). "
             "Relax QC thresholds or reduce HVG filtering."
         )
-    sc.tl.pca(adata_hvg, n_comps=n_comps)
+    sc.tl.pca(adata_hvg, n_comps=n_comps, random_state=random_state)
 
     # Copy embeddings back
     adata.obsm["X_pca"] = adata_hvg.obsm["X_pca"]
@@ -275,10 +274,10 @@ def preprocess(
         )
 
     # Neighbors + UMAP + Leiden
-    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs_use)
-    sc.tl.umap(adata)
+    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs_use, random_state=random_state)
+    sc.tl.umap(adata, random_state=random_state)
     leiden_flavor = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["leiden_flavor"]
-    sc.tl.leiden(adata, resolution=leiden_resolution, flavor=leiden_flavor)
+    sc.tl.leiden(adata, resolution=leiden_resolution, flavor=leiden_flavor, random_state=random_state)
 
     n_clusters = adata.obs["leiden"].nunique()
     logger.info("Leiden clustering: %d clusters (resolution=%.2f)", n_clusters, leiden_resolution)
@@ -288,7 +287,7 @@ def preprocess(
     if resolutions:
         for res in resolutions:
             col_name = f"leiden_res_{res}"
-            sc.tl.leiden(adata, resolution=res, flavor=leiden_flavor, key_added=col_name)
+            sc.tl.leiden(adata, resolution=res, flavor=leiden_flavor, key_added=col_name, random_state=random_state)
             n_cl = adata.obs[col_name].nunique()
             multi_res_info[str(res)] = n_cl
             logger.info("  Resolution %.2f: %d clusters", res, n_cl)

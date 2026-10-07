@@ -45,7 +45,6 @@ from skills.spatial._lib.preprocessing import (
     PREPROCESS_METHOD,
     SUPPORTED_SPECIES,
     TISSUE_PRESETS,
-    preprocess,
 )
 from skills.spatial._lib.viz import (
     PlotSpec,
@@ -1071,6 +1070,8 @@ def get_demo_data():
 
 
 def main() -> None:
+    from skills._sdk.notebook import load_skill
+
     parser = _build_parser()
     args = parser.parse_args()
     _validate_args(parser, args)
@@ -1092,11 +1093,14 @@ def main() -> None:
         input_file = args.input_path
 
     params, resolutions = _collect_run_configuration(args)
-    adata, summary = preprocess(
+    library = load_skill(SKILL_NAME)
+    adata = library.preprocess(
         adata,
         resolutions=resolutions,
         **{key: value for key, value in params.items() if key not in {"data_type", "resolutions"}},
     )
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state")  # The legacy CLI has no seed flag or summary field.
 
     gallery_context = _prepare_preprocess_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

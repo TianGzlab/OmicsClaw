@@ -256,3 +256,23 @@ def test_read_input_of_a_missing_file(step):
     with pytest.raises(FileNotFoundError):
         read_input("data/missing.csv")
     assert os.environ["OMICSCLAW_STEP_LEDGER"]
+
+
+def test_spatial_demo_has_seeded_counts_and_spatial_domains(step, tmp_path, monkeypatch):
+    pytest.importorskip("anndata")
+    import numpy as np
+
+    monkeypatch.setenv("OMICSCLAW_DEMO_DIR", str(tmp_path / "demos"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    first = load_demo("spatial_synthetic")
+    second = load_demo("spatial_synthetic")
+    assert first.shape == (180, 300)
+    assert first.obsm["spatial"].shape == (180, 2)
+    np.testing.assert_array_equal(first.X, second.X)
+    assert np.all(first.X >= 0) and np.all(first.X == np.floor(first.X))
+    for group in range(3):
+        chosen = first.obs["domain_ground_truth"] == f"domain_{group}"
+        block = slice(group * 30, (group + 1) * 30)
+        assert first.X[chosen, block].mean() > 3 * first.X[~chosen, block].mean()
+    events = _events(step[1], "input")
+    assert events[-1]["sha256"] == events[-2]["sha256"]

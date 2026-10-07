@@ -26,6 +26,15 @@ CLI_ONLY = {
     "sc-fastq-qc": "Samples FASTQ files and runs optional FastQC/MultiQC; steps use run_cli.",
 }
 
+SPATIAL_PENDING = {
+    "spatial-de", "spatial-enrichment", "spatial-genes",
+    "spatial-annotate", "spatial-domains", "spatial-microenvironment-subset", "spatial-statistics",
+    "spatial-integrate", "spatial-register", "spatial-condition",
+    "spatial-deconv", "spatial-communication", "spatial-cnv", "spatial-trajectory", "spatial-velocity",
+    "spatial-raw-processing",
+}
+"""Plan 0075 S2-S6; remove a name when its library or CLI-only disposition lands."""
+
 
 def _ids(path: Path) -> str:
     return path.name
@@ -49,3 +58,11 @@ def test_every_singlecell_skill_has_a_library_or_an_explicit_disposition():
     assert not libraries & cli_only
     assert set(directories) == libraries | cli_only
     assert all(reason.strip() for reason in CLI_ONLY.values())
+
+
+def test_every_spatial_skill_has_a_library_or_a_pending_migration():
+    directories = {p.parent.name: p.parent for p in (REPO / "skills/spatial").rglob("SKILL.md")}
+    libraries = {name for name, path in directories.items() if (path / "_api.py").is_file()}
+    assert not libraries & SPATIAL_PENDING
+    assert set(directories) == libraries | SPATIAL_PENDING
+    assert all((directories[name] / "examples/example_step.py").is_file() for name in libraries)

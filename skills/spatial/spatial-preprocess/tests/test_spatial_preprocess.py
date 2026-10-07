@@ -46,6 +46,7 @@ def demo_output(tmp_path_factory):
     return output_dir
 
 
+@pytest.mark.cli_subprocess
 def test_demo_mode(demo_output):
     """spatial-preprocess --demo should run without error."""
     assert (demo_output / "report.md").exists()
@@ -58,6 +59,7 @@ def test_demo_mode(demo_output):
     assert (demo_output / "reproducibility" / "commands.sh").exists()
 
 
+@pytest.mark.cli_subprocess
 def test_demo_outputs_gallery_contract(demo_output):
     """Demo mode should export gallery manifests, figure data, and the R helper."""
     assert (demo_output / "figures" / "manifest.json").exists()
@@ -75,6 +77,7 @@ def test_demo_outputs_gallery_contract(demo_output):
     assert "leiden_resolution" in run_summary
 
 
+@pytest.mark.cli_subprocess
 def test_demo_gallery_manifests_have_roles(demo_output):
     """The standard preprocess gallery should emit figure and figure-data manifests."""
     figures_manifest = json.loads((demo_output / "figures" / "manifest.json").read_text())
@@ -89,6 +92,7 @@ def test_demo_gallery_manifests_have_roles(demo_output):
     assert figure_data_manifest["recipe_id"] == "standard-spatial-preprocess-gallery"
 
 
+@pytest.mark.cli_subprocess
 def test_demo_processed_h5ad_persists_preprocess_state(demo_output):
     """Processed AnnData should keep the stable preprocessing objects used by the gallery."""
     import scanpy as sc
@@ -100,8 +104,10 @@ def test_demo_processed_h5ad_persists_preprocess_state(demo_output):
     assert "X_umap" in adata.obsm
     assert "leiden" in adata.obs.columns
     assert "highly_variable" in adata.var.columns
+    assert "omicsclaw_spatial_preprocess_run" not in adata.uns
 
 
+@pytest.mark.cli_subprocess
 def test_demo_report_content(demo_output):
     """Report should contain the upgraded visualization contract sections."""
     report = (demo_output / "report.md").read_text()
@@ -111,6 +117,7 @@ def test_demo_report_content(demo_output):
     assert "Disclaimer" in report
 
 
+@pytest.mark.cli_subprocess
 def test_demo_result_json(demo_output):
     """result.json should contain visualization metadata for downstream tools."""
     data = json.loads((demo_output / "result.json").read_text())
