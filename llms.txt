@@ -204,12 +204,13 @@ Every skill writes to `--output`:
 
 ## Shared Utilities
 
-Located in `omicsclaw/common/`:
+Skill scripts import these from `skills/_sdk/` and the per-domain `_lib/` packages, never from `omicsclaw`:
 
-- `report.py`: `generate_report_header()`, `generate_report_footer()`, `write_result_json()`
-- `adata_utils.py`: `ensure_pca()`, `ensure_neighbors()`, `require_spatial_coords()`, `store_analysis_metadata()`
-- `viz_utils.py`: `save_figure()`
-- `dependency_manager.py`: `require("package")`, `is_available("package")`
+- `skills/_sdk/report.py`: `generate_report_header()`, `generate_report_footer()`
+- `skills/_sdk/result.py`: `write_result_json()`, `load_result_json()`
+- `skills/_sdk/deps.py`: `require("package")`, `is_available("package")`
+- `skills/spatial/_lib/adata_utils.py`: `ensure_pca()`, `ensure_neighbors()`, `require_spatial_coords()`, `store_analysis_metadata()` (single-cell versions in `skills/singlecell/_lib/adata_utils.py`)
+- `skills/spatial/_lib/viz_utils.py`: `save_figure()` (single-cell version in `skills/singlecell/_lib/viz/core.py`)
 
 ---
 

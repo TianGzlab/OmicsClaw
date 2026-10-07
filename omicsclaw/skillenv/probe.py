@@ -40,7 +40,6 @@ __all__ = [
     "inventory_command",
     "parse_inventory",
     "parse_probe",
-    "probe_argv",
     "probe_command",
     "run_inventory",
     "run_probe",
@@ -272,11 +271,6 @@ def probe_command(imports: Sequence[str], dists: Sequence[str], skill_dir: str) 
         f"cd {shlex.quote(skill_dir)} 2>/dev/null || true; "
         f"python -B -c {shlex.quote(_CODE)} {shlex.quote(_payload(imports, dists, skill_dir))}"
     )
-
-
-def probe_argv(python: str, imports: Sequence[str], dists: Sequence[str], skill_dir: str) -> list[str]:
-    """The same probe as an argument vector for *python*, run without a shell."""
-    return [python, "-B", "-c", _CODE, _payload(imports, dists, skill_dir)]
 
 
 def inventory_command(imports: Sequence[str], skill_dir: str) -> str:
