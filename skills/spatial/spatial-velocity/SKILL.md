@@ -18,121 +18,107 @@ tags:
 
 ## When to use
 
-The user has a spatial AnnData with `layers["spliced"]` and
-`layers["unspliced"]` populated upstream (velocyto / kb-python /
-STARsolo) and wants RNA velocity estimated, with PAGA + cluster
-summaries and stream / phase / spatial plots. Four backends:
+Estimate velocity from measured spliced/unspliced count layers. Use spatial-trajectory when these layers are absent, or sc-velocity for non-spatial data.
 
-- `stochastic` (default scVelo) — moment-based, fast.
-- `deterministic` (scVelo) — least-squares fit, no stochastic
-  correction.
-- `dynamical` (scVelo) — full latent-time inference via
-  `recover_dynamics`. Slow on > 5K cells; use `--dynamical-n-jobs`.
-- `velovi` — deep generative model with latent time. Tunables
-  `--velovi-n-hidden`, `--velovi-n-latent`, `--velovi-n-layers`.
+## Use from a step
 
-Cluster column defaults to `leiden` (`--cluster-key`). For
-trajectory inference without spliced layers use `spatial-trajectory`.
+```python
+from skills._sdk.notebook import load_skill
+library = load_skill("spatial-velocity")
+library.velocity(adata, method='stochastic')
+```
 
-## Inputs & Outputs
+Run `examples/example_step.py` with the step runner for a synthetic, executable example.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `velocity(adata, *, method: str='stochastic', cluster_key: str='leiden', method_params: dict | None=None, random_state: int=0)`
 
-- `tables/cell_velocity_metrics.csv`
-- `tables/gene_velocity_summary.csv`
-- `tables/top_velocity_cells.csv`
-- `tables/top_velocity_genes.csv`
-- `tables/velocity_cell_metrics.csv`
-- `tables/velocity_cluster_summary.csv`
-- `tables/velocity_gene_hits.csv`
-- `tables/velocity_gene_summary.csv`
-- `tables/velocity_run_summary.csv`
-- `tables/velocity_spatial_points.csv`
-- `tables/velocity_summary.csv`
-- `tables/velocity_top_cells.csv`
-- `tables/velocity_top_genes.csv`
-- `tables/velocity_umap_points.csv`
-- `figures/velocity_cluster_summary.png`
-- `figures/velocity_confidence_distribution.png`
-- `figures/velocity_confidence_spatial.png`
-- `figures/velocity_confidence_umap.png`
-- `figures/velocity_heatmap.png`
-- `figures/velocity_latent_time_spatial.png`
-- `figures/velocity_layer_proportions.png`
-- `figures/velocity_paga.png`
-- `figures/velocity_phase.png`
-- `figures/velocity_pseudotime_spatial.png`
-- `figures/velocity_speed_distribution.png`
-- `figures/velocity_speed_spatial.png`
-- `figures/velocity_speed_umap.png`
-- `figures/velocity_stream_spatial.png`
-- `figures/velocity_stream_umap.png`
-- `figures/velocity_top_genes_barplot.png`
-- `figures/velocity_transition_confidence_umap.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `velocity_speed`; `var`: `velocity_genes`; `layers`: `velocity`
-- When `--method` is `velovi`:
-  - AnnData additionally guarantees `obs`: `latent_time`; `var`: `fit_scaling`; `layers`: `latent_time_velovi`, `fit_t`
-  - Produces artifact `spatial.latent_time` as `processed.h5ad` (`h5ad`)
+Estimate velocity in place from spliced/unspliced count layers.
 
-## Flow
+Preprocessing filters genes, normalizes X and count layers, and builds
+PCA/neighbors/moments. Optional confidence, pseudotime and latent-time
+failures are reported in run_info warnings. VELOVI GPU results can vary
+between runs even with a fixed seed. scVelo velocity pseudotime uses an
+eigensolver without a seed argument; its results vary between runs.
 
-1. Load AnnData; verify `layers["spliced"]` + `layers["unspliced"]` (`_lib/velocity.py` raises `ValueError` if missing). For `--demo`, `add_demo_velocity_layers` synthesises them (`spatial_velocity.py`).
-2. Common preprocessing: `velocity_min_shared_counts` filter → HVG cap → PCA → neighbours → moments.
-3. For scVelo (`stochastic`/`deterministic`/`dynamical`): compute velocity, velocity graph; `dynamical` runs `recover_dynamics` first.
-4. For `velovi`: train deep generative model; write per-cell `obs["latent_time"]` and `obs["velocity_speed"]` (`_lib/velocity.py`).
-5. Compute PAGA + cluster-mean speed; render stream / phase / heatmap / spatial / PAGA plots.
-6. Save tables + `processed.h5ad` + report.
+:param adata: AnnData containing measured spliced and unspliced layers.
+:param method: stochastic (CLI default), deterministic, dynamical or velovi.
+:param cluster_key: Annotation used in output summaries; default leiden.
+:param method_params: CLI options with underscores; None keeps defaults,
+    including velocity_min_shared_counts=30 and velocity_n_pcs=30.
+    See references/parameters.md for method-specific controls.
+:param random_state: PCA/neighbor and VELOVI training seed, default 0.
+:returns: The same AnnData with velocity layers, graph and JSON diagnostics.
+:raises ValueError: Missing layers or invalid method.
+:raises ImportError: A backend is unavailable; use install_skill_deps.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read the last velocity method's diagnostics and metric tables.
+
+:param adata: AnnData returned by velocity.
+:param keep: True retains diagnostics; False removes them for CLI serialization.
+:returns: A dictionary with effective method controls and warnings, or empty dict.
+
+### `cell_metrics(adata) -> pd.DataFrame`
+
+Return velocity speed, confidence and pseudotime for each spot.
+
+:param adata: AnnData returned by velocity.
+:returns: The last run's barcode-indexed cell table, or an empty table.
+
+### `gene_metrics(adata) -> pd.DataFrame`
+
+Return fitted velocity gene parameters and fit quality.
+
+:param adata: AnnData returned by velocity.
+:returns: The last run's gene-indexed table, or an empty table.
+
+### `velocity_figure(adata, *, color: str='velocity_speed', basis: str='spatial')`
+
+Plot a numeric velocity metric at spot coordinates without saving.
+
+:param adata: AnnData after velocity inference.
+:param color: Numeric observation metric; velocity_speed by default.
+:param basis: Coordinate key, spatial by default; X_umap is also supported.
+:returns: A matplotlib Figure owned by the caller.
+:raises KeyError: Missing coordinates or metric.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+scVelo supports stochastic (default), deterministic and dynamical fits. VELOVI uses scvi-tools. Pass CLI option names with underscores in `method_params`; defaults include 30 shared counts, 2000 HVGs, 30 PCs and 30 neighbors.
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
 
 ## Gotchas
 
-- **`layers["spliced"]` + `layers["unspliced"]` REQUIRED.** `_lib/velocity.py` raises `ValueError` if either is missing — there is no auto-fallback. Real data needs upstream velocyto / kb-python / STARsolo. `--demo` synthesises layers via `add_demo_velocity_layers` (`_lib/velocity.py`); demo-synthetic velocities are for CI only, NOT biological inference.
-- **`dynamical` is much slower than `stochastic`.** `recover_dynamics` is per-gene NB optimisation; expect minutes-to-hours on > 5K cells. Use `--dynamical-n-jobs N` and consider `--dynamical-n-top-genes` to cap the fit set.
-- **velovi writes its own latent time, NOT scVelo's.** Inside the velovi branch (`_lib/velocity.py`), `run_velovi` writes `layers["velocity"]`, `layers["latent_time_velovi"]`, `layers["fit_t"]`, and `obs["latent_time"]` (per-cell mean of `layers["latent_time_velovi"]`); writes `var["fit_t_"]` (velovi switch-time). The scVelo `dynamical` path runs `scv.tl.recover_dynamics` (`_lib/velocity.py`) — it writes scVelo's own `var["fit_*"]` family via the library, but does NOT write `layers["latent_time_velovi"]` or `obs["latent_time"]`.
-- **`obs["velocity_speed"]` is computed for every method.** `_compute_speed` (`_lib/velocity.py`) always populates it — scVelo computes from velocity graph; velovi from latent-time gradient.
-- **Cluster key default is `leiden`.** `spatial_velocity.py` defaults `--cluster-key` to `"leiden"`. If your annotation column is named differently, pass `--cluster-key cell_type` or PAGA / cluster summaries will mis-bin.
-- **`var["velocity_genes"]` semantics differ per backend.** Velovi sets it unconditionally to `True` for every gene (`_lib/velocity.py`). scVelo (`stochastic` / `deterministic` / `dynamical`) populates it as a real boolean filter inside `scv.tl.velocity` (`_lib/velocity.py`) using `min_r2` + `min_likelihood`. Always cross-check against `tables/velocity_gene_hits.csv` (the canonical filtered hit list) before reading `var["velocity_genes"]`.
+- `velocity` rejects missing layers; it never constructs spliced/unspliced observations from expression.
+- `run_info()['warnings']` records optional confidence/pseudotime/latent-time failures.
+- `gene_metrics` reports fitted parameters; VELOVI marks every retained gene as a velocity gene.
+- scVelo pseudotime uses an unseeded eigensolver; results vary between runs. GPU VELOVI can also vary despite its seed.
 
-## Key CLI
+## Inputs and outputs
+
+`velocity` modifies X, count layers and the gene subset in place, then adds velocity and moment layers. `cell_metrics` and `gene_metrics` return DataFrames; `velocity_figure` returns a Figure. CLI reports, tables and plots are conditional on fitted metrics and available coordinates.
+The full file inventory and conditions are in [output contract](references/output_contract.md).
+
+## CLI
 
 ```bash
-# Demo (synthetic spliced/unspliced)
-python skills/spatial/spatial-velocity/spatial_velocity.py --demo --output /tmp/velo_demo
-
-# scVelo stochastic (default)
-python skills/spatial/spatial-velocity/spatial_velocity.py \
-  --input data_with_spliced.h5ad --output results/ \
-  --method stochastic --cluster-key leiden \
-  --velocity-min-shared-counts 30 --velocity-n-top-genes 2000
-
-# scVelo dynamical (full latent-time inference)
-python skills/spatial/spatial-velocity/spatial_velocity.py \
-  --input data_with_spliced.h5ad --output results/ \
-  --method dynamical --dynamical-max-iter 10 --dynamical-n-jobs 4
-
-# veloVI (deep generative)
-python skills/spatial/spatial-velocity/spatial_velocity.py \
-  --input data_with_spliced.h5ad --output results/ \
-  --method velovi --velovi-n-hidden 256 --velovi-n-latent 10
+python skills/spatial/spatial-velocity/spatial_velocity.py --input input.h5ad --output results/
 ```
+
+The CLI retains reports and the figure gallery. Function calls do not save files.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins
-- `references/output_contract.md` — `layers` / `obs` / `var` keys per method
-- Adjacent skills: `sc-velocity-prep` (upstream singlecell — quantifies spliced/unspliced from BAMs; same approach needed for spatial), `spatial-trajectory` (parallel — pseudotime without spliced layers), `sc-velocity` (parallel — non-spatial), `spatial-domains` (upstream — provides `obs["leiden"]`)
+- `spatial-preprocess` supplies expression preprocessing.
+- [Output contract](references/output_contract.md) lists method-specific files and AnnData fields.
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `scvelo`, `scvi-tools`, `seaborn`, `torch`, `velovi`

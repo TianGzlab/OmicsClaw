@@ -1,38 +1,23 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── requirements.txt
-├── spatial_microenvironment_subset.h5ad
-├── tables/
-│   ├── center_observations.csv
-│   ├── label_composition.csv
-│   ├── selected_observations.csv
-│   └── selection_summary.csv
-└── figures/
-    └── microenvironment_selection.png
-```
+subset returns a new AnnData and leaves the input unchanged. Expression X,
+layers and raw are sliced without normalization. selection_table returns
+coordinates, center identities, role and nearest-center distance, plus the
+selection label columns. selection_figure returns a Figure without writing it.
 
-## File contents
+The CLI writes spatial_microenvironment_subset.h5ad, report.md, result.json,
+commands.sh and requirements.txt. Its tables are:
 
-- `tables/center_observations.csv` — written by `spatial_microenvironment_subset.py` (or its imported `_lib/` helpers).
-- `tables/label_composition.csv` — written by `spatial_microenvironment_subset.py` (or its imported `_lib/` helpers).
-- `tables/selected_observations.csv` — written by `spatial_microenvironment_subset.py` (or its imported `_lib/` helpers).
-- `tables/selection_summary.csv` — written by `spatial_microenvironment_subset.py` (or its imported `_lib/` helpers).
-- `figures/microenvironment_selection.png` — written by `spatial_microenvironment_subset.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_microenvironment_subset.py`.
-- `requirements.txt` — written by `spatial_microenvironment_subset.py`.
-- `spatial_microenvironment_subset.h5ad` — written by `spatial_microenvironment_subset.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+- tables/selected_observations.csv: all selected observations, labels and distances.
+- tables/center_observations.csv: selected centers only; empty when centers are excluded.
+- tables/label_composition.csv: full-input and subset counts/percentages per label.
+- tables/selection_summary.csv: parameters, resolved units and selection counts.
 
-### Demo-only outputs
+figures/microenvironment_selection.png is written when the selection plot
+succeeds. Missing center labels or an empty filtered selection raise errors.
 
-- `demo_visium.h5ad` — generated only on `--demo`.
-
-## Notes
-
-Auto-generated from `spatial_microenvironment_subset.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+obs contains microenv_role, microenv_is_center, microenv_within_radius,
+microenv_nearest_center and microenv_distance_native. microenv_distance_microns
+exists only when coordinate scale is known. The legacy selection metadata
+remains in uns['omicsclaw_spatial_microenvironment']; the separate library
+run record is removed by run_info(keep=False) before the CLI writes H5AD.

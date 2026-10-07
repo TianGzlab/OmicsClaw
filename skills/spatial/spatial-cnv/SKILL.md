@@ -18,105 +18,101 @@ tags:
 
 ## When to use
 
-The user has a preprocessed spatial AnnData with gene-coordinate
-metadata in `var["chromosome"]` / `var["start"]` / `var["end"]` and
-wants per-spot copy-number variation inferred for tumour / normal
-deconvolution. Two backends:
+Infer expression-based CNV with infercnvpy, or allele-aware CNV with R Numbat. Gene coordinates and an appropriate diploid reference are needed for interpretation.
 
-- `infercnvpy` (default) — log-ratio sliding-window over chromosomes
-  using `infercnvpy`. Tunables `--window-size`, `--step`,
-  `--infercnv-lfc-clip`, `--infercnv-chunksize`, `--infercnv-n-jobs`.
-- `numbat` — R-based, allele-aware clone deconvolution using
-  phased SNP allele counts. Requires `obsm["allele_counts"]`.
-  Tunables `--numbat-genome` (`hg19`/`hg38`), `--numbat-max-entropy`,
-  `--numbat-min-llr`, `--numbat-min-cells`, `--numbat-ncores`.
+## Use from a step
 
-`--reference-key <obs col>` + `--reference-cat <category>` define
-the normal-reference subset (strongly recommended).
+```python
+from skills._sdk.notebook import load_skill
+library = load_skill("spatial-cnv")
+library.cnv(adata, reference_key='cell_type', reference_cat=['Normal'])
+```
 
-## Inputs & Outputs
+Run `examples/example_step.py` with the step runner for a synthetic, executable example.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`, `allele_counts`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `cnv(adata, *, method: str='infercnvpy', reference_key: str | None=None, reference_cat: list[str] | str | None=None, window_size: int=100, step: int=10, method_params: dict | None=None, random_state: int=0, allele_counts: pd.DataFrame | None=None)`
 
-- `tables/allele_counts.csv`
-- `tables/cnv_bin_summary.csv`
-- `tables/cnv_group_sizes.csv`
-- `tables/cnv_run_summary.csv`
-- `tables/cnv_scores.csv`
-- `tables/cnv_spatial_points.csv`
-- `tables/cnv_umap_points.csv`
-- `tables/numbat_calls.csv`
-- `tables/numbat_clone_post.csv`
-- `tables/numbat_results.csv`
-- `figures/cnv_bin_summary.png`
-- `figures/cnv_group_sizes.png`
-- `figures/cnv_groups_umap.png`
-- `figures/cnv_heatmap.png`
-- `figures/cnv_score_distribution.png`
-- `figures/cnv_spatial.png`
-- `figures/cnv_umap.png`
-- `figures/cnv_uncertainty_distribution.png`
-- `figures/cnv_uncertainty_spatial.png`
-- `numbat_input.h5ad`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `cnv_score`, `cnv_leiden`, `numbat_p_cnv`, `numbat_clone`, `numbat_entropy`; `uns`: `numbat_calls`, `numbat_clone_post`
+Infer CNV in place from log-normalized X or Numbat raw counts.
 
-## Flow
+infercnvpy needs var chromosome/start/end. Numbat needs layers['counts'],
+phased allele_counts and a diploid reference annotation. Counts and metadata
+are exchanged with R inside a temporary directory.
 
-1. Load AnnData (`--input`) or build a demo with synthetic gene-coords (`spatial_cnv.py`). For Numbat, validate `obsm["allele_counts"]` (`_lib/cnv.py`).
-2. Sync `obsm["spatial"]` ↔ `obsm["X_spatial"]`; cast `obs["cnv_leiden"]` and `obs["numbat_clone"]` outputs to Categorical (`spatial_cnv.py`). The user-supplied `--reference-key` column is NOT cast.
-3. For `infercnvpy`: run `cnv.tl.infercnv` → `cnv.tl.pca` → `cnv.tl.leiden` → `cnv.tl.cnv_score` (`_lib/cnv.py`).
-4. For `numbat`: invoke R Numbat via the adapter; read clone posterior + per-cell entropy; write to `uns` + `obs` (`_lib/cnv.py`).
-5. Compute per-clone group sizes + per-bin mean CNV (`spatial_cnv.py`).
-6. Render heatmap / spatial / UMAP / clone-overlay / score-distribution / uncertainty plots.
-7. Save tables + `processed.h5ad` + report.
+:param adata: AnnData with expression and method-specific annotations.
+:param method: infercnvpy (CLI default) or numbat.
+:param reference_key: Observation column marking reference cells; None uses all cells.
+:param reference_cat: Reference labels; None uses the backend's global reference.
+:param window_size: Genomic smoothing window, 100 genes by default.
+:param step: Sliding-window stride, 10 genes by default.
+:param method_params: CLI options with underscores, such as infercnv_n_jobs=1;
+    None keeps defaults listed in references/parameters.md.
+:param random_state: infercnvpy PCA/graph/clustering and Numbat R seed, default 0.
+:param allele_counts: Numbat long-form DataFrame with cell/snp_id/CHROM/POS/AD/DP/GT/gene;
+    None reads the legacy obsm['allele_counts'] table. Multiple SNPs per cell are allowed.
+:returns: The same AnnData with CNV matrices, scores and JSON diagnostics.
+:raises ValueError: Missing genomic annotations, raw counts or invalid parameters.
+:raises ImportError: Missing infercnvpy or R backend; use install_skill_deps.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read the last CNV inference diagnostics.
+
+:param adata: AnnData returned by cnv.
+:param keep: True retains diagnostics; False removes them before CLI serialization.
+:returns: Method, score summary, seed and any fallback details, or an empty dict.
+
+### `scores(adata) -> pd.DataFrame`
+
+Return CNV scores and labels in observation order.
+
+:param adata: AnnData after CNV inference.
+:returns: Barcode-indexed table of available CNV score/label/uncertainty columns.
+
+### `cnv_figure(adata, *, basis: str='spatial')`
+
+Plot CNV scores over supplied coordinates without saving.
+
+:param adata: AnnData after CNV inference.
+:param basis: Coordinate key, spatial by default; X_umap is also supported.
+:returns: A matplotlib Figure owned by the caller.
+:raises KeyError: Missing coordinates or CNV score.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+infercnvpy uses log-normalized X, a 100-gene window and stride 10. Numbat uses integer layers['counts'] and phased allele counts. Pass method-specific CLI option names with underscores in `method_params`.
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
 
 ## Gotchas
 
-- **`var["chromosome"]` / `var["start"]` / `var["end"]` REQUIRED.** Without per-gene genomic coordinates, infercnvpy cannot bin genes by chromosome. The `--demo` path injects synthetic coords (`spatial_cnv.py`); for real data, run gene-coord lookup (Ensembl / GENCODE) upstream.
-- **No `--reference-key` ⇒ per-cell baseline drift.** When no normal reference is set, infercnvpy treats the cohort mean as baseline, which inflates CNV calls in homogeneous tumour samples. Always pass `--reference-key cell_type --reference-cat Normal` (or analogous).
-- **Numbat needs `obsm["allele_counts"]` AND raw counts.** `_lib/cnv.py` raises `ValueError` if allele counts are missing; raw counts come from `adata.layers["counts"]`. Build the allele-count DataFrame upstream from phased VCFs (Numbat docs).
-- **`obs["cnv_leiden"]` has a no-cluster fallback.** `_lib/cnv.py` writes `pd.Categorical(np.repeat("cnv_all", adata.n_obs))` when leiden clustering fails (e.g. degenerate CNV PCA). Inspect `cnv_run_summary.csv` to distinguish "1 clone" (real) from "fallback" (failure).
-- **`--step` must be ≤ `--window-size`.** `spatial_cnv.py` rejects with `parser.error` when violated. Default window 100, step 10 ≈ 90% overlap.
-- **`obs["cnv_score"]` is set by infercnvpy's `cnv.tl.cnv_score`.** OmicsClaw only fills NaNs (`_lib/cnv.py`) — don't expect this column when `--method numbat`; Numbat writes `obs["numbat_p_cnv"]` instead.
+- `cnv` rejects missing genomic `chromosome`, `start` and `end` columns for infercnvpy.
+- `cnv` requires real counts and `obsm['allele_counts']` for Numbat; the example uses explicitly synthetic coordinates only for infercnvpy.
+- `run_info` records the clustering fallback if infercnvpy cannot build Leiden groups.
+- `cnv(..., allele_counts=table)` accepts multiple SNP rows per cell; its R subprocess uses the requested random seed.
 
-## Key CLI
+## Inputs and outputs
+
+`cnv` returns the same AnnData with method-specific scores. `scores` returns a DataFrame and `cnv_figure` a Figure. CLI output includes `processed.h5ad`, reports and conditional score, bin, clone and uncertainty tables/plots.
+The full file inventory and conditions are in [output contract](references/output_contract.md).
+
+## CLI
 
 ```bash
-# Demo
-python skills/spatial/spatial-cnv/spatial_cnv.py --demo --output /tmp/cnv_demo
-
-# infercnvpy with explicit normal reference (default)
-python skills/spatial/spatial-cnv/spatial_cnv.py \
-  --input preprocessed.h5ad --output results/ \
-  --method infercnvpy \
-  --reference-key cell_type --reference-cat Normal Stromal \
-  --window-size 100 --step 10 --infercnv-n-jobs 4
-
-# Numbat (R, allele-aware) — requires obsm["allele_counts"]
-python skills/spatial/spatial-cnv/spatial_cnv.py \
-  --input preprocessed_with_alleles.h5ad --output results/ \
-  --method numbat --numbat-genome hg38 \
-  --numbat-min-llr 5.0 --numbat-min-cells 50 --numbat-ncores 4
+python skills/spatial/spatial-cnv/spatial_cnv.py --input input.h5ad --output results/
 ```
+
+The CLI retains reports and the figure gallery. Function calls do not save files.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins; reference choice
-- `references/output_contract.md` — per-method `obs` / `uns` keys
-- Adjacent skills: `spatial-preprocess` (upstream), `spatial-domains` (upstream — provides `obs["leiden"]` for cluster overlays), `spatial-annotate` (upstream — provides `obs[cell_type]` for `--reference-cat`), `spatial-condition` (parallel — DE between conditions), `spatial-trajectory` (parallel — clonal lineage if combined with CNV)
+- `spatial-preprocess` supplies expression preprocessing.
+- [Output contract](references/output_contract.md) lists method-specific files and AnnData fields.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`anndata`, `infercnvpy`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`
+`anndata`, `infercnvpy`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`, `Matrix`, `numbat`

@@ -19,96 +19,95 @@ tags:
 
 ## When to use
 
-The user has a labelled spatial AnnData (cell-type or domain labels in
-`obs[--center-key]`) and wants to extract a niche around a chosen cell
-population — i.e., the center cells PLUS every spot / cell within a
-spatial radius of any center. Output is a downstream-ready AnnData
-restricted to that microenvironment.
+Extract centers and nearby observations. Use spatial-domains for global regions and spatial-condition for condition comparisons.
 
-Single backend (radius-based KD-tree neighbourhood). Two radius modes:
-`--radius-microns` (with `--microns-per-coordinate-unit` if your
-coords aren't in microns) OR `--radius-native` (in the AnnData's
-native coordinate units). Exactly one is required.
+## Use from a step
 
-For *global* tissue-domain detection use `spatial-domains`. For
-cross-condition niche comparison use `spatial-condition`.
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("spatial-microenvironment-subset")
+data = read_input("input.h5ad")
+data = library.subset(data, center_key="cell_type", center_values=["Tumor"], radius_native=50)
+write_output(library.selection_table(data), "tables/results.csv")
+```
 
-## Inputs & Outputs
+Run [examples/example_step.py](examples/example_step.py) through the step runner.
 
-**Inputs**
+## API
 
-- Input kinds: `file`, `directory`
-- Modalities: visium, xenium
-- File types: `.h5ad`, `.h5`, `.hdf5`, `.zarr`
-- Expects `obsm`: `spatial`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `subset(adata, *, center_values: list[str], center_key: str | None=None, radius_native: float | None=None, radius_microns: float | None=None, microns_per_coordinate_unit: float | None=None, data_type: str | None=None, include_centers: bool=True, target_key: str | None=None, target_values: list[str] | None=None)`
 
-- `tables/center_observations.csv`
-- `tables/label_composition.csv`
-- `tables/selected_observations.csv`
-- `tables/selection_summary.csv`
-- `figures/microenvironment_selection.png`
-- `spatial_microenvironment_subset.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `microenv_is_center`, `microenv_role`, `microenv_within_radius`, `microenv_nearest_center`, `microenv_distance_native`, `microenv_distance_microns`
+Return a new neighborhood AnnData; expression matrices remain unchanged.
 
-## Flow
+:param adata: Labelled AnnData with spatial coordinates; X, layers and raw are sliced.
+:param center_values: Labels defining centers, required as in the CLI.
+:param center_key: Label column; None selects the first recognized label column.
+:param radius_native: Positive coordinate-unit radius; default None requires radius_microns.
+:param radius_microns: Positive micron radius, exclusive with radius_native.
+:param microns_per_coordinate_unit: Explicit positive scale; None uses platform metadata.
+:param data_type: Optional platform hint used to resolve units, as in the CLI.
+:param include_centers: True retains centers regardless of the target-label filter.
+:param target_key: Optional neighbor label column; None uses the center column.
+:param target_values: Optional allowed neighbor labels; None admits all labels.
+:returns: A new AnnData with role, distance and JSON diagnostics.
+:raises ValueError: Invalid radius, labels, units, coordinates or an empty selection.
 
-1. Load AnnData (`--input`) or build a demo.
-2. Validate radius flags (`parser.error` on `≤ 0`); resolve `--microns-per-coordinate-unit` if needed.
-3. Resolve center mask: rows where `obs[--center-key] ∈ --center-values` (comma-split).
-4. Build a KD-tree on `obsm["spatial"]`; query each center for neighbours within radius.
-5. Optionally restrict neighbour pool to `obs[--target-key] ∈ --target-values`.
-6. Build the subset (centers + qualified neighbours; optionally drop centers via `--exclude-centers`).
-7. Save subset AnnData with role + distance columns; emit composition / summary tables; render selection figure.
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read selection counts and resolved coordinate units.
+
+:param adata: AnnData returned by subset.
+:param keep: True retains diagnostics; False removes them for CLI serialization.
+:returns: Selection diagnostics, or an empty dict before analysis.
+
+### `selection_table(adata)`
+
+Return coordinates, center identities and nearest-center distances.
+
+:param adata: AnnData returned by subset; expression values are not read.
+:returns: One DataFrame row per selected observation.
+:raises KeyError: Selection columns are absent.
+
+### `selection_figure(adata)`
+
+Plot selected centers and neighbors in coordinate units.
+
+:param adata: AnnData returned by subset; reads coordinates and microenv_role.
+:returns: A matplotlib Figure without saving it.
+:raises KeyError: Selection roles are absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+KD-tree distances select observations near a center. Exactly one native or micron radius is required; micron distances require known coordinate units.
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
 
 ## Gotchas
 
-- **All input + radius validation goes through `parser.error` (exit code 2).** `spatial_microenvironment_subset.py` for missing `--input`; for missing path; for non-positive `--microns-per-coordinate-unit`; for non-positive `--radius-microns`; for non-positive `--radius-native`. Wrappers expecting `ValueError` need to catch exit-2.
-- **`--radius-microns` and `--radius-native` are mutually exclusive AND required.** `argparse.add_mutually_exclusive_group(required=True)` enforces it before the manual checks. Using neither hits a different `parser.error` (argparse-generated). Mixing the two raises argparse's standard "not allowed with" error.
-- **`--microns-per-coordinate-unit` is needed when coords aren't in microns.** Visium typically already stores spatial coords in pixels; pass the platform-specific scale (e.g., `0.65` µm / pixel for high-res Visium) to make `--radius-microns` meaningful. Without it, the radius is treated as if coords were already in microns.
-- **`--center-values` is required and `--center-key` is auto-resolvable.** `--center-values` always required (no default); `--center-key` defaults to None and the script auto-picks a sensible labelled obs column. For ambiguous AnnDatas, pass both explicitly.
-- **`--exclude-centers` drops the center cells from the output.** Useful when you want to characterise *the niche around* a population without the population itself biasing downstream stats. By default centers ARE retained — `spatial_microenvironment_subset.py` invokes the helper with `include_centers=not args.exclude_centers`; `result.json["params"]["exclude_centers"]` records the raw flag.
-- **No raise for empty selection.** If the radius is too small or `--center-values` matches no rows, the script proceeds with an empty / center-only AnnData; `tables/selection_summary.csv` and `result.json["n_selected_observations"]` record `0`. Always check before chaining downstream.
+- `subset` returns a copy and raises ValueError for missing centers or empty selections. `selection_table` adds micron distances only when a scale is known.
+- `run_info(keep=False)` removes library diagnostics before CLI serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The library returns AnnData, DataFrames or Figures without file writes. The CLI
+keeps reports, result.json, tables and conditional gallery outputs. See the
+complete [output contract](references/output_contract.md) for filenames and conditions.
+
+## CLI
 
 ```bash
-# Demo (synthetic spatial with cell-type labels)
-python skills/spatial/spatial-microenvironment-subset/spatial_microenvironment_subset.py --demo --output /tmp/spatial_microenv_demo \
-  --center-values tumor --radius-microns 50
-
-# T-cell niche, 50 µm radius (Visium with 0.65 µm/pixel scale)
-python skills/spatial/spatial-microenvironment-subset/spatial_microenvironment_subset.py \
-  --input annotated.h5ad --output results/ \
-  --center-key cell_type --center-values "T cell,CD8+ T cell" \
-  --radius-microns 50 --microns-per-coordinate-unit 0.65
-
-# Tumor-infiltrating lymphocyte niche restricted to immune neighbours only
-python skills/spatial/spatial-microenvironment-subset/spatial_microenvironment_subset.py \
-  --input annotated.h5ad --output results/ \
-  --center-key cell_type --center-values "Tumor" \
-  --target-key cell_type --target-values "T cell,B cell,Macrophage,NK cell" \
-  --radius-microns 100 --microns-per-coordinate-unit 0.65
-
-# Niche around domain "1" using native coords, exclude the centers
-python skills/spatial/spatial-microenvironment-subset/spatial_microenvironment_subset.py \
-  --input annotated.h5ad --output results/ \
-  --center-key spatial_domain --center-values "1" \
-  --radius-native 50 --exclude-centers
+python skills/spatial/spatial-microenvironment-subset/spatial_microenvironment_subset.py --input data.h5ad --output results/spatial-microenvironment-subset --center-values Tumor --radius-native 50
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, radius / scale conventions
-- `references/methodology.md` — radius selection guide; coordinate-unit semantics
-- `references/output_contract.md` — `obs["microenv_is_center"]` / `obs["microenv_role"]` / `obs["microenv_distance_native"]` / `obs["microenv_distance_microns"]` schema
-- Adjacent skills: `spatial-annotate` / `spatial-domains` (upstream — produce `obs[--center-key]` labels), `spatial-de` (downstream — DE on the niche subset between center vs neighbours), `spatial-communication` (downstream — L-R analysis restricted to a niche), `spatial-condition` (parallel — cross-condition niche comparison)
+- [Methodology](references/methodology.md)
+- [Parameters](references/parameters.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`

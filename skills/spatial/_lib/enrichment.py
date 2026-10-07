@@ -284,28 +284,15 @@ def _resolve_gene_sets(
                 }
             except Exception as exc:
                 last_error = exc
-        warnings.append(
-            f"Could not resolve remote library '{requested_source}' for species '{species}'. "
-            f"Falling back to a local OmicsClaw signature library. Last error: {last_error}"
-        )
+        raise ValueError(
+            f"Could not resolve remote library '{requested_source}' for species '{species}': {last_error}. "
+            "Supply a local gene-set file or explicitly choose omicsclaw_core."
+        ) from last_error
     else:
-        warnings.append(
-            "gseapy is not installed, so remote gene-set libraries are unavailable. "
-            "Falling back to a local OmicsClaw signature library."
+        raise ImportError(
+            "gseapy is required for remote libraries; use install_skill_deps "
+            "or supply a local gene-set file."
         )
-
-    gene_sets = (
-        _build_demo_gene_sets(var_names)
-        if _looks_like_demo_genes(var_names)
-        else _build_core_gene_sets(species)
-    )
-    mode = "builtin_demo_fallback" if _looks_like_demo_genes(var_names) else "builtin_core_fallback"
-    return gene_sets, {
-        "requested_source": requested_source,
-        "resolved_source": "omicsclaw_demo" if _looks_like_demo_genes(var_names) else "omicsclaw_core",
-        "library_mode": mode,
-        "warnings": warnings,
-    }
 
 
 def _canonicalize_gene_sets(
@@ -741,7 +728,7 @@ def run_enrichr(
                 no_plot=True,
                 verbose=False,
             )
-            res = enr.results.copy() if hasattr(enr, "results") else enr.res2d.copy()
+            res = pd.DataFrame(enr.results if hasattr(enr, "results") else enr.res2d).copy()
         except Exception as exc:
             warnings.append(f"Group '{group}' ORA fell back to local hypergeometric testing: {exc}")
             res = _run_hypergeometric_ora(
@@ -1017,6 +1004,7 @@ def run_enrichment(
     ssgsea_ascending: bool = METHOD_PARAM_DEFAULTS["ssgsea"]["ssgsea_ascending"],
     ssgsea_threads: int = METHOD_PARAM_DEFAULTS["ssgsea"]["ssgsea_threads"],
     ssgsea_seed: int = METHOD_PARAM_DEFAULTS["ssgsea"]["ssgsea_seed"],
+    gene_sets: dict[str, list[str]] | None = None,
 ) -> dict:
     """Run pathway enrichment analysis with a stable local-first fallback strategy."""
     if method not in SUPPORTED_METHODS:
@@ -1030,13 +1018,14 @@ def run_enrichment(
     if species not in VALID_SPECIES:
         raise ValueError(f"species must be one of {VALID_SPECIES}")
 
-    gene_sets, gene_set_meta = _resolve_gene_sets(
-        source=source,
-        species=species,
-        gene_set=gene_set,
-        gene_set_file=gene_set_file,
-        var_names=adata.var_names,
-    )
+    if gene_sets is None:
+        gene_sets, gene_set_meta = _resolve_gene_sets(
+            source=source, species=species, gene_set=gene_set,
+            gene_set_file=gene_set_file, var_names=adata.var_names,
+        )
+    else:
+        gene_set_meta = dict(requested_source='provided', resolved_source='provided',
+                             library_mode='provided', warnings=[])
     gene_sets = _canonicalize_gene_sets(gene_sets, universe=adata.var_names)
     if not gene_sets:
         raise ValueError(

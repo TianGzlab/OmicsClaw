@@ -54,10 +54,10 @@ def real():
 # ---- the real file -----------------------------------------------------------------------
 
 
-def test_the_real_registry_has_63_entries_with_the_expected_kinds(real):
-    assert len(real) == 63
+def test_the_real_registry_has_66_entries_with_the_expected_kinds(real):
+    assert len(real) == 66
     assert {k for k, v in real.items() if v["kind"] == "git"} == {"STAGATE-pyG", "pybanksy", "STalign"}
-    assert {k for k, v in real.items() if v["kind"] == "r"} == {"xcms", "metaboanalyst"}
+    assert {k for k, v in real.items() if v["kind"] == "r"} == {"xcms", "metaboanalyst", "Matrix", "numbat", "CellChat"}
     assert {k for k, v in real.items() if "also" in v} == {"singler"}
     assert {k for k, v in real.items() if "alt_env" in v} == {"pybanksy"}
 
@@ -75,7 +75,7 @@ def test_reading_imports_nothing_from_skills():
     proc = subprocess.run([sys.executable, "-B", "-c", code], cwd=REPO, env=env,
                           capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout.strip().splitlines()[-1]) == [63, []]
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == [66, []]
 
 
 def test_what_is_read_equals_what_the_module_defines(real):

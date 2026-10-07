@@ -130,6 +130,7 @@ def run_morans(
     adata, *, n_top_genes: int = 20, fdr_threshold: float = 0.05,
     n_neighs: int = 6, n_perms: int | None = 100,
     corr_method: str = "fdr_bh", coord_type: str | None = None,
+    random_state: int = 0,
 ) -> tuple[pd.DataFrame, dict]:
     """Compute Moran's I for all genes and return ranked SVG table + summary.
 
@@ -155,7 +156,7 @@ def run_morans(
         n_perms=n_perms_resolved,
         corr_method=corr_method,
         n_jobs=1,
-        seed=0,  # pin the permutation-test RNG → reproducible SVG p-values/scores
+        seed=random_state,
     )
 
     if "moranI" not in adata.uns:
@@ -489,6 +490,7 @@ def run_sparkx(
 def run_flashs(
     adata, *, n_top_genes: int = 20, fdr_threshold: float = 0.05,
     n_rand_features: int = 500, bandwidth: float | None = None,
+    random_state: int = 42,
 ) -> tuple[pd.DataFrame, dict]:
     """FlashS randomized-kernel SVG detection (Python native, fast).
 
@@ -508,7 +510,7 @@ def run_flashs(
     if bandwidth_used < 1e-10:
         bandwidth_used = 1.0
 
-    rng = np.random.RandomState(42)
+    rng = np.random.RandomState(random_state)
     m = n_rand_features
     omega = rng.randn(2, m) / bandwidth_used
     phase = rng.uniform(0, 2 * np.pi, m)

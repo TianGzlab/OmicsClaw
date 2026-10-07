@@ -87,12 +87,13 @@ def _normalize_exclude_chromosomes(value) -> list[str] | None:
     return normalized or None
 
 
-def _get_allele_counts_df(adata) -> pd.DataFrame:
+def _get_allele_counts_df(adata, allele_counts=None) -> pd.DataFrame:
     """Return validated allele counts table for Numbat."""
-    if "allele_counts" not in adata.obsm:
+    if allele_counts is None and "allele_counts" not in adata.obsm:
         raise ValueError("Numbat requires allele count data in adata.obsm['allele_counts']")
 
-    allele_counts = adata.obsm["allele_counts"]
+    if allele_counts is None:
+        allele_counts = adata.obsm["allele_counts"]
     if isinstance(allele_counts, pd.DataFrame):
         df = allele_counts.copy()
     elif hasattr(allele_counts, "to_pandas"):
@@ -113,6 +114,8 @@ def _get_allele_counts_df(adata) -> pd.DataFrame:
 
     df = df.copy()
     df["cell"] = df["cell"].astype(str)
+    if not set(df["cell"]) <= set(adata.obs_names):
+        raise ValueError("Allele counts contain cells absent from adata.obs_names")
     return df
 
 
@@ -137,7 +140,8 @@ def run_infercnvpy(adata, *, reference_key: str | None = None, reference_cat: li
                    chunksize: int = METHOD_PARAM_DEFAULTS["infercnvpy"]["chunksize"],
                    n_jobs: int | None = METHOD_PARAM_DEFAULTS["infercnvpy"]["n_jobs"],
                    leiden_resolution: float = METHOD_PARAM_DEFAULTS["infercnvpy"]["leiden_resolution"],
-                   neighbors_k: int = METHOD_PARAM_DEFAULTS["infercnvpy"]["neighbors_k"]) -> dict:
+                   neighbors_k: int = METHOD_PARAM_DEFAULTS["infercnvpy"]["neighbors_k"],
+                   random_state: int = 0) -> dict:
     """Infer CNV using inferCNVpy.
 
     Uses ``adata.X`` (log-normalized) — inferCNVpy subtracts the reference
@@ -185,7 +189,7 @@ def run_infercnvpy(adata, *, reference_key: str | None = None, reference_cat: li
     # adata.obs['cnv_leiden'], so build the standard PCA -> neighbors ->
     # Leiden chain after infercnv() finishes.
     logger.info("Computing CNV PCA / neighbors / Leiden before CNV scoring...")
-    cnv.tl.pca(adata)
+    cnv.tl.pca(adata, random_state=random_state)
     cnv_rep_key = None
     for candidate in ("X_cnv_pca", "cnv_pca", "X_cnv"):
         if candidate in adata.obsm:
@@ -196,6 +200,7 @@ def run_infercnvpy(adata, *, reference_key: str | None = None, reference_cat: li
         n_neighbors = 1
     else:
         n_neighbors = max(2, min(int(neighbors_k), adata.n_obs - 1))
+    fallback = {}
     try:
         if cnv_rep_key is None:
             raise KeyError(
@@ -206,9 +211,11 @@ def run_infercnvpy(adata, *, reference_key: str | None = None, reference_cat: li
             use_rep=cnv_rep_key,
             key_added="cnv_neighbors",
             n_neighbors=n_neighbors,
+            random_state=random_state,
         )
-        cnv.tl.leiden(adata, resolution=leiden_resolution)
+        cnv.tl.leiden(adata, resolution=leiden_resolution, random_state=random_state)
     except Exception as exc:
+        fallback = {"requested_method": "cnv_leiden", "executed_method": "single_group_cnv_score", "fallback_reason": str(exc)}
         logger.warning(
             "CNV Leiden clustering failed (%s). Falling back to a single CNV group for cnv_score().",
             exc,
@@ -239,6 +246,7 @@ def run_infercnvpy(adata, *, reference_key: str | None = None, reference_cat: li
         "high_cnv_fraction_pct": float(f"{high_cnv_pct:.2f}"),
         "cnv_score_key": cnv_score_col,
         "n_cnv_clusters": int(adata.obs["cnv_leiden"].nunique()) if "cnv_leiden" in adata.obs else 0,
+        **fallback,
     }
 
 
@@ -247,7 +255,8 @@ def run_numbat(adata, *, reference_key: str | None = None, reference_cat: list[s
                max_entropy: float = METHOD_PARAM_DEFAULTS["numbat"]["max_entropy"],
                min_llr: float = METHOD_PARAM_DEFAULTS["numbat"]["min_llr"],
                min_cells: int = METHOD_PARAM_DEFAULTS["numbat"]["min_cells"],
-               ncores: int = METHOD_PARAM_DEFAULTS["numbat"]["ncores"]) -> dict:
+               ncores: int = METHOD_PARAM_DEFAULTS["numbat"]["ncores"],
+               allele_counts=None, random_state: int = 0) -> dict:
     """Haplotype-aware CNV inference via R Numbat subprocess.
 
     Uses raw integer UMI counts from ``adata.layers["counts"]`` — Numbat's
@@ -259,17 +268,16 @@ def run_numbat(adata, *, reference_key: str | None = None, reference_cat: list[s
         (from ``pileup_and_phase.R``) with columns cell/snp_id/CHROM/POS/AD/DP/GT/gene
       - Optional ``lambdas_ref``: gene x cell_type normalized reference expression
 
-    Falls back to ``adata.X`` with a warning if no counts layer is available.
+    Counts are exchanged with R as a genes-by-cells Matrix Market file.
     """
-    import anndata as ad
     import tempfile
+    from scipy.io import mmwrite
     from pathlib import Path
     from skills._sdk.deps import validate_r_environment
     from skills._sdk.r_script_runner import RScriptRunner
-    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
     from skills._sdk.r_utils import read_r_result_csv
 
-    validate_r_environment(required_r_packages=["numbat", "SingleCellExperiment", "zellkonverter"])
+    validate_r_environment(required_r_packages=["numbat", "Matrix"])
 
     if not reference_key or not reference_cat:
         raise ValueError(
@@ -280,44 +288,27 @@ def run_numbat(adata, *, reference_key: str | None = None, reference_cat: list[s
     if genome not in VALID_NUMBAT_GENOMES:
         raise ValueError(f"Unsupported Numbat genome '{genome}'. Choose from: {VALID_NUMBAT_GENOMES}")
 
-    allele_df = _get_allele_counts_df(adata)
-
-    counts_layer = _get_counts_layer(adata)
-
-    # Construct lightweight AnnData to avoid copying large unrelated layers/graphs/images
-    if counts_layer is not None:
-        logger.info("Numbat: using adata.layers['%s'] (raw integer counts)", counts_layer)
-        export_X = adata.layers[counts_layer].copy()
-    else:
-        logger.warning(
-            "Numbat: no 'counts' layer or adata.raw found; will use adata.X. "
-            "If adata.X is log-normalized, Numbat results will be incorrect. "
-            "Ensure preprocessing saves raw counts: adata.layers['counts'] = adata.X.copy()"
-        )
-        export_X = adata.X.copy()
-        
-    adata_export = ad.AnnData(
-        X=export_X,
-        obs=adata.obs.copy(),
-        var=adata.var.copy(),
-    )
-    logger.info("Numbat: prepared lightweight AnnData (dropped heavy uns/obsp arrays) for R export")
-
-    scripts_dir = _SDK_R_SCRIPTS_DIR
+    allele_df = _get_allele_counts_df(adata, allele_counts)
+    if "counts" not in adata.layers:
+        raise ValueError("Numbat requires raw integer layers['counts']")
+    export_X = adata.layers["counts"]
+    scripts_dir = Path(__file__).resolve().parents[1] / "spatial-cnv" / "rscripts"
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_numbat_") as tmpdir:
         tmpdir = Path(tmpdir)
-        input_path = tmpdir / "numbat_input.h5ad"
         allele_path = tmpdir / "allele_counts.csv"
-        adata_export.write_h5ad(input_path)
+        mmwrite(tmpdir / "counts.mtx", sparse.coo_matrix(export_X.T))
+        pd.Series(adata.obs_names).to_csv(tmpdir / "barcodes.tsv", sep="\t", index=False, header=False)
+        pd.Series(adata.var_names).to_csv(tmpdir / "features.tsv", sep="\t", index=False, header=False)
+        adata.obs.to_csv(tmpdir / "obs.csv", index_label="cell")
         allele_df.to_csv(allele_path, index=False)
 
         output_dir = tmpdir / "output"
         output_dir.mkdir()
 
         args = [
-            str(input_path),
+            str(tmpdir),
             str(output_dir),
             str(allele_path),
             reference_key or "",
@@ -327,11 +318,12 @@ def run_numbat(adata, *, reference_key: str | None = None, reference_cat: list[s
             str(min_llr),
             str(min_cells),
             str(ncores),
+            str(random_state),
         ]
 
         logger.info("Spawning external R process for Numbat...")
         runner.run_script(
-            "sp_numbat.R",
+            "numbat.R",
             args=args,
             expected_outputs=["numbat_results.csv", "numbat_clone_post.csv"],
             output_dir=output_dir,
@@ -397,7 +389,8 @@ def run_cnv(adata, *, method: str = "infercnvpy", reference_key: str | None = No
             numbat_max_entropy: float = METHOD_PARAM_DEFAULTS["numbat"]["max_entropy"],
             numbat_min_llr: float = METHOD_PARAM_DEFAULTS["numbat"]["min_llr"],
             numbat_min_cells: int = METHOD_PARAM_DEFAULTS["numbat"]["min_cells"],
-            numbat_ncores: int = METHOD_PARAM_DEFAULTS["numbat"]["ncores"]) -> dict:
+            numbat_ncores: int = METHOD_PARAM_DEFAULTS["numbat"]["ncores"],
+            random_state: int = 0, numbat_allele_counts=None) -> dict:
     """Run CNV inference. Returns summary dict.
 
     Input matrix is selected per-method:
@@ -426,6 +419,8 @@ def run_cnv(adata, *, method: str = "infercnvpy", reference_key: str | None = No
             min_llr=numbat_min_llr,
             min_cells=numbat_min_cells,
             ncores=numbat_ncores,
+            allele_counts=numbat_allele_counts,
+            random_state=random_state,
         )
     elif method == "infercnvpy":
         result = run_infercnvpy(
@@ -439,6 +434,7 @@ def run_cnv(adata, *, method: str = "infercnvpy", reference_key: str | None = No
             exclude_chromosomes=infercnv_exclude_chromosomes,
             chunksize=infercnv_chunksize,
             n_jobs=infercnv_n_jobs,
+            random_state=random_state,
         )
     else:
         raise NotImplementedError(f"Handler for method '{method}' is not implemented.")

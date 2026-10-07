@@ -1,121 +1,129 @@
 ---
 name: spatial-condition
-description: Load when comparing two or more experimental conditions (treatment vs control) on a multi-sample
-  preprocessed spatial AnnData via PyDESeq2 pseudobulk or Wilcoxon DE — needs `obs[condition_key]`, `obs[sample_key]`,
-  and cluster labels. Skip when running per-cluster DE on one condition (use spatial-de); comparing two
-  slices without replicates.
-trigger: condition comparison, pseudobulk, DESeq2, PyDESeq2, treatment vs control, experimental conditions, replicate-aware differential expression
+description: Load when comparing conditions on spatial AnnData using biological-sample pseudobulk PyDESeq2 or Wilcoxon, with sample, condition and cluster labels. Skip one-condition per-cluster DE (use spatial-de) and experiments without independent replicates.
+trigger: condition comparison, pseudobulk, DESeq2, treatment vs control
 tags:
 - spatial
 - condition
 - pseudobulk
-- pydeseq2
-- wilcoxon
 - differential-expression
 ---
 
 # spatial-condition
 
+## Use from a step
+
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("spatial-condition")
+adata = library.compare_conditions(read_input("data/samples.h5ad"))
+write_output(library.results(adata), "tables/pseudobulk_de.csv")
+```
+
 ## When to use
 
-The user has a preprocessed multi-sample spatial AnnData with
-`obs[condition_key]` (e.g. `treatment`/`control`), `obs[sample_key]`
-(biological replicate id), and a cluster column (default `leiden`),
-and wants per-cluster differential expression between conditions.
-Two backends:
-
-- `pydeseq2` (default) — pseudobulk per `(sample, cluster)`,
-  PyDESeq2 NB/GLM. Requires raw counts in `layers["counts"]` (or
-  `adata.raw` as fallback). Honours replicate structure correctly.
-- `wilcoxon` — spot-level Wilcoxon rank-sum
-  (`scanpy.tl.rank_genes_groups`). Cheap fallback when no replicate
-  structure exists, but ignores pseudoreplication.
-
-For per-cluster DE within a single condition use `spatial-de`. For
-spatially variable genes use `spatial-genes`.
+Compare conditions within each expression cluster using independent biological
+samples. Both PyDESeq2 and Wilcoxon operate on sample-level pseudobulk counts.
+Splitting spots from one sample does not create biological replicates.
+For per-cluster marker genes use spatial-de.
 
 ## Inputs & Outputs
 
-**Inputs**
+Input: AnnData with raw integer counts and sample/condition columns.
+Counts are read from `layers["counts"]`, then `raw`, then `X`.
+Nonfinite, negative or fractional counts are rejected, not rounded.
+Missing default `leiden` labels trigger expression clustering; other missing
+cluster columns raise.
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`
-
-**Outputs**
-
-- `tables/cluster_de_metrics.csv`
-- `tables/condition_run_summary.csv`
-- `tables/condition_spatial_points.csv`
-- `tables/condition_umap_points.csv`
-- `tables/per_cluster_summary.csv`
-- `tables/pseudobulk_de.csv`
-- `tables/pseudobulk_volcano_points.csv`
-- `tables/sample_counts_by_condition.csv`
-- `tables/skipped_contrasts.csv`
-- `tables/top_de_genes.csv`
-- `figures/cluster_de_burden.png`
-- `figures/condition_de_barplot.png`
-- `figures/condition_effect_burden_spatial.png`
-- `figures/condition_effect_burden_umap.png`
-- `figures/condition_pvalue_distribution.png`
-- `figures/condition_spatial_context.png`
-- `figures/pseudobulk_volcano.png`
-- `figures/sample_counts_by_condition.png`
-- `figures/skipped_contrasts.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`)
-
-## Flow
-
-1. Load AnnData (`--input`) or build a 12-sample demo (`--demo`).
-2. Validate `obs[condition_key]` + `obs[sample_key]` exist (`_lib/condition.py` raises `ValueError` if missing); cast `condition_key` + `cluster_key` to Categorical (`spatial_condition.py`).
-3. For `pydeseq2`: aggregate raw counts per `(sample, cluster)` pseudobulk; require `layers["counts"]` or fall back to `adata.raw`.
-4. Per cluster: skip the contrast if either condition has < `--min-samples-per-condition` samples; log to `tables/skipped_contrasts.csv`.
-5. Fit DE model per surviving (cluster, contrast); apply `--fdr-threshold` + `--log2fc-threshold`.
-6. Compute UMAP / spatial summaries; render plots; save tables and `processed.h5ad`.
-
-## Gotchas
-
-- **`pydeseq2` falls back silently when raw counts are missing.** `_lib/condition.py` (`_get_counts_matrix`) prefers `adata.layers["counts"]`, falls back to `adata.raw`, then to `adata.X` — each fallback only logs a warning. If `adata.X` is log-normalised, pseudobulk sums are statistically invalid (`log(a)+log(b) != log(a+b)`). Always preprocess so `layers["counts"]` is populated. `wilcoxon` skips this codepath entirely — it normalises internally.
-- **Single-condition / no-replicate clusters are silently skipped.** `tables/skipped_contrasts.csv` lists clusters with < `--min-samples-per-condition` samples per condition. Always inspect that file — clusters not in `pseudobulk_de.csv` were dropped, not "no DE genes".
-- **`--condition-key` and `--sample-key` must be different columns.** `spatial_condition.py` rejects via `parser.error` when they match. A common mistake is using `condition` for both — pseudobulk needs the sample axis distinct from the condition axis.
-- **`obs[condition_key]` and `obs[cluster_key]` cast to Categorical in place.** `spatial_condition.py` overwrites both columns with `pd.Categorical(...)`. Order is sorted-unique unless `--reference-condition` pins the reference level — non-alphabetical custom orderings on input are lost. `obs[sample_key]` is NOT cast.
-- **`obsm["X_pca"]` is recomputed inside the script when needed.** `spatial_condition.py` writes `obsm["X_pca"] = adata_hvg.obsm["X_pca"]` for the UMAP / PCA reporting view; this is a diagnostic recompute, not a published embedding.
-- **PyDESeq2 needs ≥ 2 samples per condition.** `--min-samples-per-condition` defaults to 2. If your study has one slice per condition, either pool spots into pseudo-replicates upstream or fall back to `--method wilcoxon`.
+Functions return the same AnnData plus accessible result tables and a figure.
+CLI writes `processed.h5ad`, `report.md`, `result.json`,
+`tables/pseudobulk_de.csv`, per-cluster and skipped-contrast tables,
+and a diagnostic gallery. See [references/output_contract.md](references/output_contract.md)
+for file names and generation conditions.
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic 12-sample data)
-python skills/spatial/spatial-condition/spatial_condition.py --demo --output /tmp/cond_demo
-
-# PyDESeq2 pseudobulk (default)
-python skills/spatial/spatial-condition/spatial_condition.py \
-  --input preprocessed.h5ad --output results/ \
-  --method pydeseq2 \
-  --condition-key treatment --sample-key sample_id --cluster-key leiden \
-  --reference-condition control \
-  --min-samples-per-condition 3 --fdr-threshold 0.05 --log2fc-threshold 1.0
-
-# Wilcoxon spot-level (cheap fallback when no replicates)
-python skills/spatial/spatial-condition/spatial_condition.py \
-  --input preprocessed.h5ad --output results/ \
-  --method wilcoxon --condition-key treatment --sample-key sample_id \
-  --wilcoxon-alternative two-sided
+python skills/spatial/spatial-condition/spatial_condition.py --input samples.h5ad --output results/condition --condition-key condition --sample-key sample_id --reference-condition control
+python skills/spatial/spatial-condition/spatial_condition.py --demo --output /tmp/spatial_condition
 ```
 
-## See also
+`examples/example_step.py` checks sample-level counts on simulated data.
+[references/parameters.md](references/parameters.md) lists all backend flags.
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins; replicate-count rules
-- `references/output_contract.md` — pseudobulk + skipped-contrast schemas
-- Adjacent skills: `spatial-preprocess` (upstream), `spatial-domains` (upstream — provides `obs["leiden"]`), `spatial-de` (parallel — per-cluster DE within one condition), `spatial-integrate` (upstream — required for cross-batch comparisons), `spatial-statistics` (parallel — per-gene Moran's I)
+## Gotchas
+
+- `tables/skipped_contrasts.csv` explains missing comparisons; absence is not
+  evidence of no differential expression.
+- `pseudobulk_de.csv` includes per-row method and sample counts. PyDESeq2 fit
+  failures can use Wilcoxon; `run_info()["fallbacks"]` records the reason and
+  requested/executed methods. Missing PyDESeq2 raises with an installer hint.
+- `layers["counts"]` must be real counts, not rounded log-normalized expression.
+- `condition_key` and `sample_key` must differ, and each sample must belong
+  to exactly one condition.
+- `n_samples_reference` and `n_samples_other` count samples, never spots.
+  Two replicates per condition are the default minimum, not a power guarantee.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `compare_conditions(adata, *, condition_key: str='condition', sample_key: str='sample_id', cluster_key: str='leiden', method: str='pydeseq2', reference_condition: str | None=None, min_counts_per_gene: int=10, min_samples_per_condition: int=2, fdr_threshold: float=0.05, log2fc_threshold: float=1.0, random_state: int=0, **parameters)`
+
+Aggregate counts per sample and cluster, then test conditions in place.
+
+Both methods use biological-sample pseudobulk, not individual spots.
+PyDESeq2 fitting failures may fall back to Wilcoxon, with warnings and a
+per-contrast fallback record. Missing packages do not trigger fallback.
+
+:param adata: AnnData with integer counts in layers['counts'], raw, or X,
+    in that preference order; each sample belongs to exactly one condition.
+:param condition_key: Condition column, default condition.
+:param sample_key: Biological replicate column, default sample_id.
+:param cluster_key: Cluster column, default leiden; missing leiden is computed.
+:param method: pydeseq2 (default) or pseudobulk wilcoxon.
+:param reference_condition: Reference label; None uses the first sorted condition.
+:param min_counts_per_gene: Minimum total pseudobulk count, default 10.
+:param min_samples_per_condition: Minimum independent replicates, default 2.
+:param fdr_threshold: Adjusted p-value threshold, default 0.05.
+:param log2fc_threshold: Absolute effect threshold for hit summaries, default 1.
+:param random_state: Seed for clustering only if leiden is absent, default 0.
+:param parameters: Backend options retain CLI defaults: pydeseq2_fit_type='parametric',
+    pydeseq2_size_factors_fit_type='ratio', pydeseq2_refit_cooks=True,
+    pydeseq2_alpha=0.05, pydeseq2_cooks_filter=True,
+    pydeseq2_independent_filter=True, pydeseq2_n_cpus=1,
+    wilcoxon_alternative='two-sided'.
+:returns: The same AnnData with JSON-encoded tables and diagnostics; results
+    returns the DE table and run_info includes skipped contrasts.
+:raises ValueError: Invalid counts, design, cluster column or parameters.
+:raises ImportError: Missing PyDESeq2; use install_skill_deps.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read comparison diagnostics and result tables.
+
+:param adata: AnnData returned by compare_conditions.
+:param keep: True retains diagnostics; False removes them for CLI serialization.
+:returns: Summary including global_de, per_cluster_de and skipped contrasts.
+
+### `results(adata) -> pd.DataFrame`
+
+Return all tested genes across clusters and condition contrasts.
+
+:param adata: Compared AnnData.
+:returns: DataFrame with gene, log2fc, pvalue_adj, cluster, contrast and sample counts.
+    Empty if every contrast was skipped or diagnostics were removed.
+
+### `volcano_figure(adata, *, contrast: str | None=None)`
+
+Plot log2 fold changes against adjusted p-values.
+
+:param adata: Compared AnnData.
+:param contrast: Optional exact contrast label; None shows all tested entries.
+:returns: A matplotlib Figure; the caller saves and closes it.
+
+<!-- api:end -->
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `matplotlib`, `numpy`, `pandas`, `pydeseq2`, `scanpy`, `scipy`, `seaborn`, `statsmodels`

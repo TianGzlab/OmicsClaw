@@ -53,7 +53,6 @@ from skills.spatial._lib.cnv import (
     METHOD_PARAM_DEFAULTS,
     SUPPORTED_METHODS,
     VALID_NUMBAT_GENOMES,
-    run_cnv,
 )
 from skills.spatial._lib.viz import (
     PlotSpec,
@@ -1162,13 +1161,20 @@ def main():
                 args.method,
             )
 
-    summary = run_cnv(
+    from skills._sdk.notebook import load_skill
+
+    library = load_skill(SKILL_NAME)
+    library.cnv(
         adata,
         method=args.method,
         reference_key=reference_key,
         reference_cat=reference_cat,
-        **method_kwargs,
+        window_size=method_kwargs.pop("window_size", 100),
+        step=method_kwargs.pop("step", 10),
+        method_params=method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state", None)
 
     gallery_context = _prepare_cnv_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

@@ -42,7 +42,6 @@ from skills.spatial._lib.velocity import (
     SCVELO_METHODS,
     SUPPORTED_METHODS,
     add_demo_velocity_layers,
-    run_velocity,
 )
 from skills.spatial._lib.viz import (
     PlotSpec,
@@ -1647,7 +1646,14 @@ def main() -> None:
     params = _collect_run_configuration(args)
     logger.info("Running %s with parameters: %s", args.method, params)
 
-    summary = run_velocity(adata, **params)
+    from skills._sdk.notebook import load_skill
+
+    library = load_skill(SKILL_NAME)
+    library.velocity(adata, method=args.method, cluster_key=args.cluster_key,
+                     method_params={key: value for key, value in params.items()
+                                    if key not in {"method", "cluster_key"}})
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state", None)
     summary["effective_params"] = params.copy()
 
     gallery_context = _prepare_velocity_gallery_context(adata, summary)

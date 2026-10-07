@@ -3,6 +3,14 @@
 
 # Parameters
 
+## Function keywords
+
+`enrich` accepts the flags below as underscore-separated keywords, for example
+`gsea_min_size=15`. Defaults match the CLI. `random_state=123` supplies the
+default GSEA/ssGSEA seed; an explicit `gsea_seed` or `ssgsea_seed` takes priority.
+Pass `gene_sets={term: [genes]}` for an in-memory library. File/report flags
+stay in the CLI.
+
 ## Allowed extra CLI flags
 
 - `--de-corr-method`

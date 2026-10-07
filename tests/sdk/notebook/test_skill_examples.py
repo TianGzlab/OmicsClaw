@@ -25,11 +25,13 @@ REPO = Path(__file__).resolve().parents[3]
 RUN = REPO / "skills" / "_sdk" / "notebook" / "run.py"
 EXAMPLES = sorted(
     p for p in (REPO / "skills").rglob("examples/example_step.py")
-    if (p.parent.parent / "_api.py").is_file()
+    if (p.parent.parent / "_api.py").is_file() or p.parent.parent.name == "spatial-raw-processing"
 )
 EXAMPLES = [
     pytest.param(example, marks=pytest.mark.skill_example_extended, id=example.parent.parent.name)
-    if example.parent.parent.name == "sc-perturb" else pytest.param(example, id=example.parent.parent.name)
+    if example.parent.parent.name == "sc-perturb" else
+    pytest.param(example, marks=pytest.mark.skill_example_spatial, id=example.parent.parent.name)
+    if example.parent.parent.name.startswith("spatial-") else pytest.param(example, id=example.parent.parent.name)
     for example in EXAMPLES
 ]
 
@@ -47,14 +49,42 @@ def test_the_example_step_runs(example, tmp_path):
     assert new.returncode == 0, new.stdout + new.stderr
     step = root / "analysis" / "01_demo" / f"01_{skill.replace('-', '_')}.py"
     shutil.copy2(example, step)
+    if skill.startswith("spatial-"):
+        (step.parent / "02_validate.py").write_text(
+            "# %%\nfrom pathlib import Path\n"
+            "from skills._sdk.notebook import read_input\n"
+            "outputs = Path('results/01_demo')\n"
+            "files = [p for folder in ('tables', 'figures', 'intermediate') "
+              "for p in (outputs / folder).rglob('*') if p.is_file()]\n"
+            "assert files, 'example wrote no result artifacts'\n"
+            "for path in files:\n"
+            "    if path.suffix == '.h5ad':\n"
+            "        data = read_input(str(path))\n"
+            "        assert data.n_obs > 0 and data.n_vars > 0\n",
+            encoding="utf-8",
+        )
     run = subprocess.run([sys.executable, str(RUN), "run", "analysis/01_demo"], cwd=root, env=env,
                          capture_output=True, text=True, timeout=1800)
     assert run.returncode == 0, run.stdout[-4000:] + run.stderr[-4000:]
     assert (root / "results" / "01_demo" / "notebooks" / f"{step.stem}.ipynb").is_file()
     runs = _ledger.runs_of(root / "results" / "01_demo" / "provenance" / "runs", step.stem)
     calls = [c for c in runs[-1].skill_calls if c["skill"] == skill]
-    assert calls, f"the example made no recorded call to {skill}"
-    assert runs[-1].skill_loads[0]["stub"] is False
+    if skill == "spatial-raw-processing":
+        assert (root / "results/01_demo/intermediate/spatial-raw-processing/raw_counts.h5ad").is_file()
+    else:
+        assert calls, f"the example made no recorded call to {skill}"
+        assert runs[-1].skill_loads[0]["stub"] is False
+    if skill.startswith("spatial-"):
+        outputs = root / "results/01_demo"
+        tables = {path.relative_to(outputs): hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in (outputs / "tables").rglob("*.csv")}
+        replay = subprocess.run([sys.executable, str(RUN), "replay", "analysis/01_demo"],
+                                cwd=root, env=env, capture_output=True, text=True, timeout=1800)
+        assert replay.returncode == 0, replay.stdout[-4000:] + replay.stderr[-4000:]
+        for relative, digest in tables.items():
+            assert hashlib.sha256((outputs / relative).read_bytes()).hexdigest() == digest
+        manifest = json.loads((outputs / "provenance/manifest.json").read_text())
+        assert manifest["status"] == "replayed" and manifest["replay"]["status"] == "ok"
 
 
 def test_velocity_example_rejects_reversed_kinetics(tmp_path):
@@ -77,6 +107,7 @@ def test_velocity_example_rejects_reversed_kinetics(tmp_path):
     assert "simulation kinetics: velocity direction is wrong" in run.stdout + run.stderr
 
 
+@pytest.mark.skill_example_spatial
 def test_spatial_preprocess_example_replays_in_a_fresh_kernel(tmp_path):
     example = REPO / "skills/spatial/spatial-preprocess/examples/example_step.py"
     assert example.is_file()

@@ -3,6 +3,20 @@
 
 # Parameters
 
+## Python library
+
+Call deconvolve(spatial, reference=reference_adata, method=..., random_state=0).
+Load both AnnData objects with read_input. Method keywords omit their CLI prefix:
+sketch_dim, lambda_spatial and n_hvg for FlashDeconv; n_epochs,
+n_cells_per_spot and detection_alpha for cell2location; mode for RCTD;
+condscvi_epochs, n_hidden, n_latent, n_layers, dropout_rate and vamp_prior_p
+for DestVI; rna_epochs, spatial_epochs, learning_rate and batch_size for
+Stereoscope; n_epochs, learning_rate and mode for Tangram. SPOTlight uses
+n_top, nmf_model, min_prop, scale and weight_id; CARD uses sample_key,
+min_count_gene, min_count_spot, imputation, num_grids and ineibor.
+use_gpu=False selects CPU for capable Python methods. The legacy --n-epochs
+CLI alias is not a Python parameter; use each method's training option.
+
 ## Allowed extra CLI flags
 
 - `--card-imputation`

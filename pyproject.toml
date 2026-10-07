@@ -417,6 +417,7 @@ markers = [
     "scripted_eval: deterministic scripted agent evals (hermetic, no network); run on every PR by the eval job",
     "skill_example: runs a pilot skill's examples/example_step.py through the step runner on demo data (excluded by default; CI job skill-examples)",
     "skill_example_extended: runs the real CPU pertpy example in its pinned extended CI environment",
+    "skill_example_spatial: runs spatial examples and fresh-kernel replay in the spatial CPU CI environment",
 ]
 filterwarnings = [
     "ignore::FutureWarning",

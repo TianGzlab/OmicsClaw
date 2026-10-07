@@ -23,10 +23,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from skills._sdk.runtime_env import ensure_runtime_cache_dirs
-
-ensure_runtime_cache_dirs()
-
 from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
@@ -235,9 +231,9 @@ def _standardize_lr_df(df: pd.DataFrame) -> pd.DataFrame:
     if "score" not in out.columns:
         out["score"] = 0.0
     if "pvalue" not in out.columns:
-        out["pvalue"] = 1.0
+        out["pvalue"] = np.nan
     out["score"] = _round_numeric(out["score"], default=0.0)
-    out["pvalue"] = _round_numeric(out["pvalue"], default=1.0)
+    out["pvalue"] = _round_numeric(out["pvalue"], default=np.nan)
 
     keep_cols = ["ligand", "receptor", "source", "target", "score", "pvalue"]
     if "pathway" in out.columns:
@@ -340,6 +336,7 @@ def _run_liana(
     min_cells: int = METHOD_PARAM_DEFAULTS["liana"]["min_cells"],
     n_perms: int = METHOD_PARAM_DEFAULTS["liana"]["n_perms"],
     resource: str = METHOD_PARAM_DEFAULTS["liana"]["resource"],
+    random_state: int = 1337,
 ) -> tuple[pd.DataFrame, dict]:
     """Run LIANA+ rank_aggregate."""
     li = require("liana", feature="LIANA+ cell communication")
@@ -368,6 +365,7 @@ def _run_liana(
         expr_prop=expr_prop,
         min_cells=min_cells,
         n_perms=n_perms,
+        seed=random_state,
         verbose=True,
     )
 
@@ -404,10 +402,8 @@ def _run_liana(
 
     if "cellphone_pvals" in df.columns:
         df["pvalue"] = pd.to_numeric(df["cellphone_pvals"], errors="coerce")
-    elif "specificity_rank" in df.columns:
-        df["pvalue"] = pd.to_numeric(df["specificity_rank"], errors="coerce")
     else:
-        df["pvalue"] = 1.0
+        df["pvalue"] = np.nan
 
     return _standardize_lr_df(df), {
         "effective_params": {
@@ -426,6 +422,7 @@ def _run_cellphonedb(
     species: str = "human",
     iterations: int = METHOD_PARAM_DEFAULTS["cellphonedb"]["iterations"],
     threshold: float = METHOD_PARAM_DEFAULTS["cellphonedb"]["threshold"],
+    random_state: int = 0,
 ) -> tuple[pd.DataFrame, dict]:
     """Run CellPhoneDB statistical analysis."""
     require("cellphonedb", feature="CellPhoneDB cell communication")
@@ -458,6 +455,7 @@ def _run_cellphonedb(
             iterations=iterations,
             threshold=threshold,
             threads=4,
+            debug_seed=random_state,
         )
 
     means_df = result.get("means")
@@ -486,7 +484,7 @@ def _run_cellphonedb(
             score = pd.to_numeric(row.get(col), errors="coerce")
             if pd.isna(score) or float(score) <= 0:
                 continue
-            pvalue = 1.0
+            pvalue = np.nan
             if pvalues_df is not None and col in pvalues_df.columns and row.name in pvalues_df.index:
                 pvalue = pvalues_df.loc[row.name, col]
             records.append(
@@ -574,33 +572,38 @@ def _run_cellchat_r(
     species: str = "human",
     prob_type: str = METHOD_PARAM_DEFAULTS["cellchat_r"]["prob_type"],
     min_cells: int = METHOD_PARAM_DEFAULTS["cellchat_r"]["min_cells"],
+    random_state: int = 1,
 ) -> tuple[pd.DataFrame, dict]:
     """Run CellChat via an R subprocess."""
     import pandas as pd
 
     from skills._sdk.deps import validate_r_environment
     from skills._sdk.r_script_runner import RScriptRunner
-    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
-    from skills._sdk.r_utils import read_r_result_csv
+    from scipy.io import mmwrite
+    from scipy import sparse
 
     species = _validate_species("cellchat_r", species)
     validate_r_environment(
-        required_r_packages=["CellChat", "SingleCellExperiment", "zellkonverter"]
+        required_r_packages=["CellChat", "Matrix"]
     )
 
-    scripts_dir = _SDK_R_SCRIPTS_DIR
+    scripts_dir = Path(__file__).resolve().parents[1] / 'spatial-communication' / 'rscripts'
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_cellchat_sp_") as tmpdir:
         tmpdir = Path(tmpdir)
-        input_path = tmpdir / "input.h5ad"
-        adata.write_h5ad(input_path)
+        input_path = tmpdir / 'input'
+        input_path.mkdir()
+        mmwrite(input_path / 'matrix.mtx', sparse.csr_matrix(adata.X).T)
+        pd.Series(adata.obs_names).to_csv(input_path / 'barcodes.tsv', sep='\t', index=False, header=False)
+        pd.Series(adata.var_names).to_csv(input_path / 'features.tsv', sep='\t', index=False, header=False)
+        adata.obs.to_csv(input_path / 'obs.csv')
 
         output_dir = tmpdir / "output"
         output_dir.mkdir()
 
         runner.run_script(
-            "sc_cellchat.R",
+            "cellchat.R",
             args=[
                 str(input_path),
                 str(output_dir),
@@ -608,12 +611,14 @@ def _run_cellchat_r(
                 species,
                 prob_type,
                 str(min_cells),
+                str(random_state),
             ],
             expected_outputs=["cellchat_results.csv"],
             output_dir=output_dir,
         )
 
-        df = read_r_result_csv(output_dir / "cellchat_results.csv", index_col=None)
+        labels = dict.fromkeys(['ligand', 'receptor', 'source', 'target', 'pathway', 'cell_type'], str)
+        df = pd.read_csv(output_dir / "cellchat_results.csv", dtype=labels)
         extra_tables: dict[str, pd.DataFrame] = {}
         optional_tables = {
             "cellchat_pathways_df": ("cellchat_pathways.csv", None),
@@ -624,7 +629,12 @@ def _run_cellchat_r(
         for table_key, (filename, index_col) in optional_tables.items():
             table_path = output_dir / filename
             if table_path.exists():
-                extra_tables[table_key] = pd.read_csv(table_path, index_col=index_col)
+                if index_col is None:
+                    extra_tables[table_key] = pd.read_csv(table_path, dtype=labels)
+                else:
+                    matrix = pd.read_csv(table_path, dtype=str)
+                    matrix = matrix.set_index(matrix.columns[0]).apply(pd.to_numeric)
+                    extra_tables[table_key] = matrix
 
     if df.empty:
         return _empty_lr_df(), {

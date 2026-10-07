@@ -1493,12 +1493,18 @@ def main() -> None:
 
     adata = sc.read_h5ad(args.input_path)
     params, method_kwargs = _collect_run_configuration(args)
-    run_fn = METHOD_DISPATCH[args.method]
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
 
     logger.info("Running deconvolution: method=%s", args.method)
     _log_input_convention(args.method)
 
-    prop_df, stats = run_fn(adata, **method_kwargs)
+    reference = sc.read_h5ad(method_kwargs.pop("reference_path"))
+    library.deconvolve(adata, reference=reference, method=args.method, **method_kwargs)
+    prop_df = library.proportions(adata, method=args.method)
+    stats = library.run_info(adata, keep=False)
+    stats.pop("random_state", None)
+    stats.pop("matrix_sources", None)
     stats.setdefault("method", args.method)
     prop_df = _align_proportions_to_obs(adata, prop_df)
     stats.setdefault("cell_type_key", args.cell_type_key)

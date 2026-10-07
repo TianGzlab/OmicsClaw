@@ -35,12 +35,8 @@ from skills._sdk.runtime_env import ensure_runtime_cache_dirs
 from skills.spatial._lib.adata_utils import get_spatial_key
 from skills.spatial._lib.loader import SUPPORTED_SPATIAL_PLATFORMS, load_spatial_data
 from skills.spatial._lib.microenvironment import (
-    SpatialScale,
     build_label_composition_table,
     build_selection_table,
-    compute_radius_native,
-    extract_microenvironment_subset,
-    infer_microns_per_coordinate_unit,
     parse_csv_values,
     resolve_label_key,
 )
@@ -438,36 +434,23 @@ def main() -> None:
     target_values = parse_csv_values(args.target_values)
     target_key = resolve_label_key(adata, args.target_key) if args.target_key else None
 
-    scale: SpatialScale | None = None
-    if args.radius_microns is not None or args.microns_per_coordinate_unit is not None:
-        scale = infer_microns_per_coordinate_unit(
-            adata,
-            data_type=args.data_type,
-            user_scale=args.microns_per_coordinate_unit,
-        )
-        logger.info(
-            "Resolved coordinate scale: %.6g microns per unit (%s)",
-            scale.microns_per_coordinate_unit,
-            scale.source,
-        )
-
-    radius_native, radius_microns = compute_radius_native(
-        radius_native=args.radius_native,
-        radius_microns=args.radius_microns,
-        scale=scale,
-    )
-
-    subset_adata, summary = extract_microenvironment_subset(
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    subset_adata = library.subset(
         adata,
         center_key=center_key,
         center_values=center_values,
-        radius_native=radius_native,
+        radius_native=args.radius_native,
         include_centers=not args.exclude_centers,
         target_key=target_key,
         target_values=target_values or None,
-        radius_microns=radius_microns,
-        scale=scale,
+        radius_microns=args.radius_microns,
+        microns_per_coordinate_unit=args.microns_per_coordinate_unit,
+        data_type=args.data_type,
     )
+    summary = library.run_info(subset_adata, keep=False)
+    radius_native = summary["radius_native"]
+    radius_microns = summary["radius_microns"]
 
     subset_path = output_dir / "spatial_microenvironment_subset.h5ad"
     subset_adata.write_h5ad(subset_path)

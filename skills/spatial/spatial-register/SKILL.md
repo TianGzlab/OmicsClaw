@@ -1,117 +1,118 @@
 ---
 name: spatial-register
-description: Load when aligning multiple spatial slices into a common coordinate frame on a multi-slice
-  spatial AnnData via PASTE optimal transport or STalign image-aware registration. Skip when data is single-slice
-  (no registration needed); cross-sample integration in the gene-expression space (use spatial-integrate).
-trigger: spatial registration, slice alignment, coordinate alignment, PASTE, STalign, multi-slice
+description: Load when aligning multiple spatial slices into a common coordinate frame with PASTE or STalign. Skip single-slice data; for expression-space batch correction use spatial-integrate.
+trigger: spatial registration, slice alignment, PASTE, STalign
 tags:
 - spatial
 - registration
 - alignment
-- paste
-- stalign
-- multi-slice
 ---
 
 # spatial-register
 
+## Use from a step
+
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("spatial-register")
+adata = library.register(read_input("data/slices.h5ad"), slice_key="slice")
+write_output(adata, "intermediate/registered.h5ad")
+```
+
 ## When to use
 
-The user has a multi-slice spatial AnnData (slices stacked into one
-object with a `--slice-key` column) and wants the slices registered
-into a shared coordinate frame so a downstream analysis can use the
-common axes. Two methods:
-
-- `paste` (default) — PASTE optimal-transport alignment based on gene
-  expression similarity + spatial proximity (`--paste-alpha`,
-  `--paste-dissimilarity`). Requires `paste-bio` + `pot` (+ optional
-  `torch` for GPU).
-- `stalign` — STalign image-aware diffeomorphic registration; best
-  when histology images are available (`--stalign-niter`,
-  `--stalign-image-size`, `--stalign-a`). Requires `STalign` + `torch`.
-
-For *expression-space* batch correction across slices use
-`spatial-integrate`. For aligning a single slice to a reference atlas
-use the same skill with that atlas as the reference slice.
+Align slice coordinates while preserving the original spatial coordinates.
+PASTE uses expression and spatial distances; STalign supports two slices.
+For expression-space correction use spatial-integrate instead.
 
 ## Inputs & Outputs
 
-**Inputs**
+Input: AnnData with expression, spatial coordinates and a slice-label column.
+The default reference is the first sorted label, not the largest slice.
+Functions return the same AnnData, shift tables and figures without writing files.
 
-- Modalities: visium, xenium
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-
-**Outputs**
-
-- `tables/registration_disparities.csv`
-- `tables/registration_metrics.csv`
-- `tables/registration_points.csv`
-- `tables/registration_run_summary.csv`
-- `tables/registration_shift_by_slice.csv`
-- `tables/registration_summary.csv`
-- `figures/registration_disparities.png`
-- `figures/registration_shift_by_slice.png`
-- `figures/registration_shift_distribution.png`
-- `figures/registration_shift_map.png`
-- `figures/slices_after.png`
-- `figures/slices_before.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obsm`: `spatial_aligned`, `spatial`, `X_spatial`
-
-## Flow
-
-1. Load AnnData (`--input`) or build a multi-slice demo via the bundled `spatial-preprocess` runner (chains across slices).
-2. `parser.error` validates numeric flag ranges (`--paste-alpha` ∈ [0, 1]; `--stalign-niter`/`-image-size`/`-a` > 0).
-3. Resolve `--slice-key` (auto-pick from `slice` / `sample` / `library_id` if unset); raise if `< 2` slices.
-4. Pick a reference slice (largest by default) and align all others to it.
-5. For PASTE: compute pairwise transport plans using `--paste-alpha` (gene-vs-spatial weight); apply translations.
-6. For STalign: run iterative image-aware diffeomorphism with `--stalign-niter` iterations.
-7. Save `processed.h5ad` (registered coords in `obsm["spatial_aligned"]`; original `obsm["spatial"]` preserved unchanged), tables, figures, `report.md`, `result.json`.
-
-## Gotchas
-
-- **All input + parameter validation goes through `parser.error` (exit code 2).** `spatial_register.py` for missing `--input`; for missing path; for `--paste-alpha` out of [0, 1]; for non-positive STalign params. Wrappers expecting `ValueError` need to catch exit-2 separately.
-- **Slice-key validation raises `ValueError` post-argparse.** `spatial_register.py` raises `ValueError(f"Slice key '<requested_key>' not found in adata.obs")`; raises `ValueError(f"Slice key '<requested_key>' must contain at least 2 slices")`. These fire after argparse, so they're real Python `ValueError`s — different from the `parser.error` group above.
-- **`paste` requires `paste-bio` + `pot`; `stalign` requires `STalign` + `torch`.** `spatial_register.py` lists the optional packages by method; the actual import sites raise `ImportError` if missing. The skill records what's installed in `reproducibility/environment.txt`.
-- **Registered coordinates land in `obsm["spatial_aligned"]`, NOT in `obsm["spatial"]`.** The original `obsm["spatial"]` is preserved unchanged; the aligned coords are added as a separate key. Downstream tools that consume `obsm["spatial"]` will keep using the *original* coords unless they explicitly switch to `obsm["spatial_aligned"]`. The legacy duplicate `obsm["X_spatial"]` also exists (`spatial_register.py`) for back-compat.
-- **Demo mode chains through `spatial-preprocess` first.** `spatial_register.py` raises `FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")` if the sibling skill is missing from the install; raises `FileNotFoundError(f"Expected {processed}")` when the demo preprocess output isn't where expected. Real runs skip this chain.
-- **Disparity / shift metrics are best-effort.** When `paste-bio` or `STalign` doesn't expose disparity scores, the metric columns in `tables/registration_metrics.csv` will be NaN — `_build_registration_metrics_table` documents the column initialisation. Quote the per-slice shifts (`mean_shift`, `median_shift`, `max_shift`) instead.
+CLI writes `processed.h5ad`, `report.md`, `result.json`, registration tables
+and the before/after gallery. See [references/output_contract.md](references/output_contract.md)
+for the complete file inventory. Registered coordinates are `obsm["spatial_aligned"]`;
+`spatial` and `X_spatial`, if present, remain unchanged.
 
 ## Key CLI
 
 ```bash
-# Demo (multi-slice synthetic; chains through spatial-preprocess)
-python skills/spatial/spatial-register/spatial_register.py --demo --output /tmp/spatial_reg_demo
-
-# PASTE alignment on a multi-slice Visium object
-python skills/spatial/spatial-register/spatial_register.py \
-  --input multi_slice.h5ad --output results/ \
-  --slice-key library_id --method paste --paste-alpha 0.1
-
-# STalign with strong image regularisation
-python skills/spatial/spatial-register/spatial_register.py \
-  --input multi_slice.h5ad --output results/ \
-  --slice-key sample --method stalign \
-  --stalign-niter 200 --stalign-image-size 256 --stalign-a 100
-
-# PASTE on GPU
-python skills/spatial/spatial-register/spatial_register.py \
-  --input multi_slice.h5ad --output results/ \
-  --method paste --paste-alpha 0.1 --paste-use-gpu
+python skills/spatial/spatial-register/spatial_register.py --input slices.h5ad --output results/registration --slice-key slice --method paste
+python skills/spatial/spatial-register/spatial_register.py --demo --output /tmp/spatial_register
 ```
 
-## See also
+`examples/example_step.py` aligns unequal-size simulated slices through the
+step runner. [references/parameters.md](references/parameters.md) lists backend flags.
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when PASTE vs STalign wins; reference-slice heuristic
-- `references/output_contract.md` — `obsm["spatial"]` preserved + `obsm["spatial_aligned"]` registered coords + legacy `obsm["X_spatial"]`
-- Adjacent skills: `spatial-raw-processing` / `spatial-preprocess` (upstream — produce per-slice AnnData), `spatial-integrate` (parallel — corrects in expression space, NOT spatial coords), `spatial-domains` (downstream — domain detection works better on registered coords), `spatial-condition` (downstream — cross-condition comparison after alignment)
+## Gotchas
+
+- `spatial_aligned` is a separate coordinate basis; downstream skills do not
+  automatically switch from `spatial`.
+- PASTE transports source spots with the transpose of its reference-by-source
+  coupling. The old `_lib/register.py:run_paste` direction was incorrect;
+  unequal slice sizes now work, and solver failures raise instead of reporting success.
+- The historical `disparities` summary is sum of squared transport weights,
+  not the optimal-transport objective or a calibrated fit statistic.
+- The tested PASTE 1.4.0 combination needs POT 0.9.4. POT 0.9.5 and 0.9.6 changed
+  the line-search call and fail inside PASTE. Use an isolated compatible environment.
+- STalign is optional and was not executed in this migration environment.
+  It has no exposed seed control here; do not claim deterministic GPU results.
+- `tables/registration_metrics.csv` has NaN disparity where the backend
+  does not report it. Inspect shifts without treating smaller displacement as better alignment.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `register(adata, *, method: str='paste', slice_key: str | None=None, reference_slice: str | None=None, **parameters)`
+
+Add aligned coordinates in place without overwriting the input coordinates.
+
+:param adata: AnnData with expression, spatial coordinates and slice labels.
+:param method: paste (default) for transport or stalign for two-slice LDDMM.
+:param slice_key: Observation column; None detects slice, sample, section or batch.
+:param reference_slice: Target label; None uses the first sorted label.
+:param parameters: PASTE alpha=0.1, dissimilarity='kl', use_gpu=False;
+    STalign image_size=(400,400), niter=2000, a=500, use_expression=False.
+    PASTE is deterministic on CPU; STalign has no seed control and may vary.
+:returns: The same AnnData with spatial_aligned and JSON run diagnostics.
+:raises ValueError: Invalid labels, coordinates, method or method parameters.
+:raises ImportError: Missing backend; use install_skill_deps for paste-bio/POT
+    or STalign/torch as appropriate.
+:raises RuntimeError: A slice cannot be aligned; partial success is not returned.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read the last registration summary.
+
+:param adata: Registered AnnData.
+:param keep: True retains diagnostics; False removes them for CLI serialization.
+:returns: Summary with reference, slices and effective parameters, or an empty dict.
+
+### `shift_table(adata) -> pd.DataFrame`
+
+Measure Euclidean displacement from original to registered coordinates.
+
+:param adata: AnnData with spatial_aligned and original spatial coordinates.
+:returns: observation and shift_distance columns, in observation order.
+:raises KeyError: Aligned coordinates are absent.
+:raises ValueError: Original coordinates are absent.
+
+### `registration_figure(adata, *, slice_key: str | None=None)`
+
+Plot original and registered slice coordinates side by side.
+
+:param adata: Registered AnnData.
+:param slice_key: Slice label column; None detects the column from the data.
+:returns: A matplotlib Figure; the caller saves and closes it.
+:raises KeyError: Aligned coordinates or labels are absent.
+
+<!-- api:end -->
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
 `anndata`, `matplotlib`, `numpy`, `pandas`, `paste-bio`, `POT`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`, `STalign`, `torch`
+
+The CLI dependency list covers both methods; install only the chosen backend.

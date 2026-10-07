@@ -44,6 +44,33 @@ def api_spatial_preprocess(case: str, *, input_path: Path) -> dict:
     }}
 
 
+def api_spatial_integrate(case: str, *, input_path: Path) -> dict:
+    import anndata as ad
+
+    library = _load("spatial-integrate")
+    data = library.integrate(ad.read_h5ad(input_path), method="harmony" if case == "default" else case)
+    summary = library.run_info(data)
+    summary.pop("random_state")
+    return {"adata": data, "summary": summary}
+
+
+def api_spatial_condition(case: str, *, input_path: Path) -> dict:
+    import anndata as ad
+
+    library = _load("spatial-condition")
+    data = library.compare_conditions(ad.read_h5ad(input_path), sample_key="sample",
+                                      method="pydeseq2" if case == "default" else "wilcoxon")
+    return {"tables": {"pseudobulk_de.csv": library.results(data)}}
+
+
+def api_spatial_register(case: str, *, input_path: Path) -> dict:
+    import anndata as ad
+
+    library = _load("spatial-register")
+    data = library.register(ad.read_h5ad(input_path), slice_key="batch")
+    return {"adata": data, "summary": library.run_info(data)}
+
+
 def api_sc_qc(case: str) -> dict:
     qc = _load("sc-qc")
     adata = qc.calculate_qc(_demo("pbmc3k_raw"), species="mouse" if case == "mouse" else "human")
@@ -468,7 +495,13 @@ def main(argv: list[str] | None = None) -> int:
     name = snapshot.REGISTRY[skill].api_runner
     if name is None:
         raise ValueError(f"{skill} has no registered API runner")
-    runner = globals()[name]
+    if ":" in name:
+        from importlib import import_module
+
+        module, function = name.split(":", 1)
+        runner = getattr(import_module(module), function)
+    else:
+        runner = globals()[name]
     source = snapshot.case_input(skill, case, Path(folder).parent / "input")
     produced = runner(case, input_path=source) if source is not None else runner(case)
     save(produced, Path(folder))

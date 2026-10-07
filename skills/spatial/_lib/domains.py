@@ -26,6 +26,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import warnings
 from collections import Counter
 
 import numpy as np
@@ -98,6 +99,7 @@ def identify_domains_leiden(
     n_neighbors: int = 15,
     n_pcs: int = 50,
     spatial_weight: float = 0.3,
+    random_state: int = 0,
 ) -> dict:
     """Leiden clustering on a composite expression + spatial graph.
 
@@ -132,6 +134,7 @@ def identify_domains_leiden(
 
     spatial_key = get_spatial_key(adata)
     adjacency = adata.obsp["connectivities"]
+    fallback = {}
 
     if spatial_key is not None and spatial_weight > 0:
         try:
@@ -150,8 +153,10 @@ def identify_domains_leiden(
                 )
         except Exception as e:
             logger.warning("Could not build spatial graph, using expression only: %s", e)
+            warnings.warn(f"Spatial graph unavailable; using expression-only Leiden: {e}", RuntimeWarning, stacklevel=2)
+            fallback = {"requested_method": "spatial_leiden", "executed_method": "expression_leiden", "fallback_reason": str(e)}
 
-    sc.tl.leiden(adata, resolution=resolution, flavor="igraph", key_added="spatial_domain", adjacency=adjacency)
+    sc.tl.leiden(adata, resolution=resolution, flavor="igraph", key_added="spatial_domain", adjacency=adjacency, random_state=random_state)
 
     n_domains = adata.obs["spatial_domain"].nunique()
     logger.info("Leiden domains: %d (resolution=%.2f)", n_domains, resolution)
@@ -162,6 +167,7 @@ def identify_domains_leiden(
         "resolution": resolution,
         "spatial_weight": spatial_weight if spatial_key else 0.0,
         "domain_counts": adata.obs["spatial_domain"].value_counts().to_dict(),
+        **fallback,
     }
 
 
@@ -172,6 +178,7 @@ def identify_domains_louvain(
     n_neighbors: int = 15,
     n_pcs: int = 50,
     spatial_weight: float = 0.0,
+    random_state: int = 0,
 ) -> dict:
     """Louvain graph clustering for spatial domain identification.
 
@@ -198,6 +205,7 @@ def identify_domains_louvain(
 
     spatial_key = get_spatial_key(adata)
     adjacency = adata.obsp["connectivities"]
+    fallback = {}
 
     if spatial_key is not None and spatial_weight > 0:
         try:
@@ -215,8 +223,10 @@ def identify_domains_louvain(
                 )
         except Exception as e:
             logger.warning("Could not build spatial graph, using expression only: %s", e)
+            warnings.warn(f"Spatial graph unavailable; using expression-only Louvain: {e}", RuntimeWarning, stacklevel=2)
+            fallback = {"requested_method": "spatial_louvain", "executed_method": "expression_louvain", "fallback_reason": str(e)}
 
-    sc.tl.louvain(adata, resolution=resolution, key_added="spatial_domain", adjacency=adjacency)
+    sc.tl.louvain(adata, resolution=resolution, key_added="spatial_domain", adjacency=adjacency, random_state=random_state)
 
     n_domains = adata.obs["spatial_domain"].nunique()
     logger.info("Louvain domains: %d (resolution=%.2f)", n_domains, resolution)
@@ -227,6 +237,7 @@ def identify_domains_louvain(
         "resolution": resolution,
         "spatial_weight": spatial_weight if spatial_key else 0.0,
         "domain_counts": adata.obs["spatial_domain"].value_counts().to_dict(),
+        **fallback,
     }
 
 

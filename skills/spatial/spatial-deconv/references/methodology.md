@@ -121,11 +121,10 @@ python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method rctd --output <dir>
 ```
 
-Every successful standard OmicsClaw wrapper run, including `oc run` and
-conversational skill execution, also writes a top-level `README.md` and a
-`reproducibility/replay.json` Capsule to make the output directory easier to
-inspect and replay. Direct script execution primarily produces the skill
-outputs plus `reproducibility/commands.sh`.
+The CLI writes its own report and output files. Notebook steps record inputs,
+outputs and function calls through the step runner; replay belongs to that
+project workflow. There is no oc run command or implicit replay capsule for
+direct script execution.
 
 
 ## Dependencies

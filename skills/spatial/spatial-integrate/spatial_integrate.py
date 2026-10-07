@@ -1013,12 +1013,17 @@ def main():
         sys.exit(1)
 
     params, method_kwargs = _collect_run_configuration(args)
-    summary = run_integration(
+    from skills._sdk.notebook import load_skill
+
+    library = load_skill(SKILL_NAME)
+    adata = library.integrate(
         adata,
         method=args.method,
         batch_key=args.batch_key,
         **method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state", None)
 
     adata.uns["spatial_integration_summary"] = summary.copy()
     gallery_context = _prepare_integration_gallery_context(

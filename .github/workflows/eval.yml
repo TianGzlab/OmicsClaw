@@ -82,7 +82,7 @@ jobs:
                       adata.write_h5ad(folder / f"{name}.h5ad")
           PY
       - name: Run each skill's example step through the step runner
-        run: pytest tests/sdk/notebook/test_skill_examples.py -m "skill_example and not skill_example_extended" -p no:cacheprovider
+        run: pytest tests/sdk/notebook/test_skill_examples.py -m "skill_example and not skill_example_extended and not skill_example_spatial" -p no:cacheprovider
       - name: Run migrated skill tests without CLI subprocesses
         run: >-
           pytest
@@ -124,6 +124,44 @@ jobs:
         run: |
           Rscript --version
           pytest tests/sdk/notebook/test_rscript.py -m requires_r -p no:cacheprovider
+
+  spatial-skills:
+    name: Spatial APIs and replay (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMBA_NUM_THREADS: "1"
+      NUMBA_DISABLE_JIT: "0"
+      OMICSCLAW_DEMO_DIR: ${{ github.workspace }}/.demo-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: .github/workflows/eval.yml
+      - run: python -m pip install --upgrade pip
+      # PASTE 1.4.0's line-search callback needs POT 0.9.4, not 0.9.5+.
+      - run: >-
+          pip install -e . pytest nbformat nbclient ipykernel
+          "numpy==2.0.2" "pandas>=2.2,<3" "anndata==0.12.11"
+          "scanpy[leiden]==1.11.5" "scikit-misc==0.5.2" "scvelo==0.3.4"
+          "harmonypy==0.0.10" bbknn scanorama "paste-bio==1.4.0" "POT==0.9.4"
+          "pydeseq2==0.5.4" "gseapy==1.2.1" "squidpy==1.8.1"
+          "liana==1.7.1" "infercnvpy==0.6.1" "flashdeconv==0.1.6"
+          "esda==2.7.1" "libpysal==4.14.1"
+      - run: pip check
+      - uses: actions/cache@v4
+        with:
+          path: .demo-data
+          key: demo-data-pbmc3k-v2
+      - name: Test public spatial APIs
+        run: pytest skills/spatial/*/tests/test_api.py -p no:cacheprovider
+      - name: Run spatial examples and replay in fresh kernels
+        run: pytest tests/sdk/notebook/test_skill_examples.py -m skill_example_spatial -p no:cacheprovider
 
   skill-examples-extended:
     # Runs on every PR, but repository owners must not select it as a required check.

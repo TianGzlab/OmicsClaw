@@ -15,6 +15,22 @@ tags:
 
 # spatial-raw-processing
 
+## Use from a step
+
+This is CLI_ONLY: ST-Pipeline consumes FASTQ files, barcode coordinates and
+reference indexes. It is not an in-memory analysis function.
+
+```python
+from skills._sdk.notebook import run_cli
+
+output = run_cli("spatial-raw-processing", "--input", "data/run_bundle.json",
+                 inputs=["data/run_bundle.json", "data/R1.fastq.gz",
+                         "data/R2.fastq.gz", "data/barcodes.tsv"])
+```
+
+Record the reference index version in the module README. The executable
+example uses synthetic upstream outputs and does not run ST-Pipeline.
+
 ## When to use
 
 The user has paired-end spatial-transcriptomics FASTQ files (`read1` =
@@ -79,7 +95,7 @@ QC use `bulkrna-read-qc`.
 - **All input failures raise typed exceptions wrapped in `SystemExit(1)`.** `spatial_raw_processing.py` catches `DataError` / `DependencyError` / `ParameterError` / `ProcessingError` and re-raises as `SystemExit(1)`. The originating raises live in `_validate_real_run_bundle` — it raises `ParameterError(f"Missing required parameter: {key}")` for missing `read1`/`read2`/`ids`; raises `DataError(...)` for non-existent files; raises `DataError("Resolved read1/read2 inputs must be FASTQ files.")` for non-FASTQ extensions; raises `ParameterError` for read1==read2; raises `DataError` for missing / wrong-type STAR index dir; raises `DataError` only when `--ref-annotation` was *provided* but the path is missing or not a file (the param itself is optional — omitting it doesn't raise).
 - **`--read1` / `--read2` / `--ids` / `--ref-map` are all required for real runs** (not enforced by argparse `required=True`, validated later). Missing any → `ParameterError`. Demo mode skips this validation entirely.
 - **The output filename is always `raw_counts.h5ad`** (`spatial_raw_processing.py`). It's not configurable — the contract is consumed by `spatial-preprocess`. Multiple runs to the same `--output` will overwrite.
-- **No tables / figures are written.** This skill is a wrapper around an external pipeline; it produces only the AnnData + the upstream tool's logs. `result.json` records the run params, not analysis stats.
+- **QC tables and figures are written.** `tables/spot_qc.csv` and `figures/raw_total_counts_spatial.png` describe the count matrix; upstream stage and saturation plots depend on available pipeline metrics.
 - **Demo mode skips ST-Pipeline entirely.** `spatial_raw_processing.py` calls `create_demo_upstream_outputs(...)` to fabricate a synthetic `raw_counts.h5ad`. Useful for plumbing checks; does NOT exercise the FASTQ → matrix code path.
 - **`--platform` is a metadata label only.** `_build_parser` documents it as "Label recorded in outputs"; ST-Pipeline doesn't branch on it. Common values: `visium`, `visium_hd`, `slideseq`, custom strings.
 

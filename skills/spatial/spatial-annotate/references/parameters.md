@@ -3,6 +3,10 @@
 
 # Parameters
 
+## Python library
+
+Call annotate(adata, method=..., reference=reference_adata, random_state=0, **parameters). Load both objects with read_input before calling. Marker parameters are cluster_key, rank_method, n_marker_genes, overlap_method, overlap_normalize, adj_pval_threshold and min_score. Tangram uses cell_type_key, n_epochs, device and n_train_genes. scANVI uses cell_type_key, batch_key, layer, n_hidden, n_latent, n_layers and max_epochs. CellAssign uses marker_genes, max_epochs, batch_key and layer. Its default layer is counts and max_epochs is 400. An explicitly empty marker mapping raises an error.
+
 ## Allowed extra CLI flags
 
 - `--batch-key`

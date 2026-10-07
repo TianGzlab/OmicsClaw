@@ -170,16 +170,23 @@ def run_paste(
                 use_gpu=use_gpu,
             )
             pi = result[0] if isinstance(result, tuple) else result
-            row_sums = pi.sum(axis=1, keepdims=True)
-            row_sums = np.where(row_sums == 0, 1.0, row_sums)
-            coords_new = (pi @ ref_coords) / row_sums
+            # Rows are reference spots; columns are source spots.
+            masses = pi.sum(axis=0)[:, None]
+            if np.any(masses <= 0):
+                raise ValueError("PASTE transport has source spots with zero mass")
+            coords_new = (pi.T @ ref_coords) / masses
 
             src_mask = adata.obs[slice_key] == sl
             aligned_coords[src_mask] = coords_new
             disparity = float(np.sum(pi * pi))
             disparities[str(sl)] = disparity
         except Exception as exc:
-            logger.warning("PASTE failed for slice '%s': %s", sl, exc)
+            if isinstance(exc, TypeError) and "line_search" in str(exc):
+                raise RuntimeError(
+                    "PASTE/POT line-search versions are incompatible; use an isolated "
+                    "environment with paste-bio==1.4.0 and POT==0.9.4."
+                ) from exc
+            raise RuntimeError(f"PASTE failed for slice '{sl}': {exc}") from exc
 
     adata.obsm["spatial_aligned"] = aligned_coords
     mean_disp = float(np.mean(list(disparities.values()))) if disparities else 0.0

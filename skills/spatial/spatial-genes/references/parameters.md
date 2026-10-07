@@ -3,6 +3,20 @@
 
 # Parameters
 
+## Function keywords
+
+`spatial_genes` accepts native backend keywords in `parameters`:
+
+| Method | Keywords and defaults |
+|---|---|
+| morans | `n_neighs=6`, `n_perms=100`, `corr_method='fdr_bh'`, `coord_type=None` |
+| spatialde | `run_aeh=True`, `min_counts_per_gene=3`, `aeh_patterns=None`, `aeh_lengthscale=None` |
+| sparkx | `n_max_genes=5000`, `num_cores=1`, `option='mixture'` |
+| flashs | `n_rand_features=500`, `bandwidth=None` |
+
+`random_state=None` keeps the method's CLI seed (Moran's I 0, FlashS 42).
+An integer overrides it for these two methods; SpatialDE AEH is unseeded.
+
 ## Allowed extra CLI flags
 
 - `--fdr-threshold`

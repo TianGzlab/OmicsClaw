@@ -3,6 +3,13 @@
 
 # Parameters
 
+## Function keywords
+
+`differential_expression` accepts the method's flags below as underscore-separated
+keywords, for example `scanpy_tie_correct=True` or `min_cells_per_sample=10`.
+Boolean `--no-*` flags become the corresponding keyword set to False.
+Defaults match the CLI. File/report flags stay in the CLI.
+
 ## Allowed extra CLI flags
 
 - `--fdr-threshold`

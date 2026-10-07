@@ -1,60 +1,36 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── requirements.txt
-├── tables/
-│   ├── domain_assignments.csv
-│   ├── domain_counts.csv
-│   ├── domain_method_embedding_points.csv
-│   ├── domain_neighbor_mixing.csv
-│   ├── domain_spatial_points.csv
-│   ├── domain_summary.csv
-│   └── domain_umap_points.csv
-└── figures/
-    ├── domain_local_purity_histogram.png
-    ├── domain_local_purity_spatial.png
-    ├── domain_neighbor_mixing.png
-    ├── domain_sizes.png
-    ├── pca_domains.png
-    ├── spatial_domains.png
-    └── umap_domains.png
-```
+Functions return the same AnnData with spatial_domain labels, a domain-count
+DataFrame or a Figure. run_info(keep=False) removes library diagnostics before
+CLI serialization.
 
-## File contents
+The CLI writes processed.h5ad, report.md, result.json, commands.sh,
+requirements.txt and r_visualization.sh. figure_data/manifest.json records
+which gallery inputs and rendered outputs are available.
 
-- `tables/domain_assignments.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `tables/domain_counts.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `tables/domain_method_embedding_points.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `tables/domain_neighbor_mixing.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `tables/domain_spatial_points.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `tables/domain_summary.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `tables/domain_umap_points.csv` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/domain_local_purity_histogram.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/domain_local_purity_spatial.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/domain_neighbor_mixing.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/domain_sizes.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/pca_domains.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/spatial_domains.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `figures/umap_domains.png` — written by `spatial_domains.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_domains.py`.
-- `manifest.json` — written by `spatial_domains.py`.
-- `processed.h5ad` — written by `spatial_domains.py`.
-- `r_visualization.sh` — written by `spatial_domains.py`.
-- `requirements.txt` — written by `spatial_domains.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Tables
 
-### Demo-only outputs
+- tables/domain_summary.csv: per-domain counts and percentages.
+- tables/domain_assignments.csv: observation labels and local purity when computed.
+- tables/domain_neighbor_mixing.csv: when spatial neighbor diagnostics exist.
+- figure_data/domain_counts.csv: gallery counts.
+- figure_data/domain_spatial_points.csv: when spatial coordinates exist.
+- figure_data/domain_umap_points.csv: when UMAP exists.
+- figure_data/domain_method_embedding_points.csv: when a backend embedding has at least two components.
+- figure_data/domain_neighbor_mixing.csv: when neighbor mixing is computed.
 
-- `demo_visium.h5ad` — generated only on `--demo`.
+## Figures
 
-## Notes
+These files depend on available coordinates/diagnostics and successful rendering:
 
-Auto-generated from `spatial_domains.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+- figures/domain_sizes.png: domain counts.
+- figures/spatial_domains.png: spatial coordinates.
+- figures/umap_domains.png: UMAP.
+- figures/pca_domains.png: PCA fallback embedding.
+- figures/domain_local_purity_spatial.png: spatial coordinates and local purity.
+- figures/domain_local_purity_histogram.png: local purity values.
+- figures/domain_neighbor_mixing.png: domain neighbor mixing matrix.
+
+Backend embeddings include X_stagate, X_graphst, X_banksy_pca and X_cellcharter;
+only the selected backend's embedding is required. Domain labels are always
+obs['spatial_domain'] after successful identification.

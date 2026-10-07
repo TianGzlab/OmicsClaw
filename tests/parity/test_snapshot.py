@@ -166,3 +166,28 @@ def test_sigkill_is_accepted_only_for_registered_velocity_recordings(tmp_path, m
     result["status"] = "failed"
     (output / "result.json").write_text(json.dumps(result))
     assert snapshot.recording_succeeded(skill, proc, output) is False
+def test_empty_csv_snapshots_compare_without_hiding_one_sided_data(tmp_path):
+    from tests.parity.snapshot import compare
+
+    left, right = tmp_path / "left", tmp_path / "right"
+    for folder in (left, right):
+        (folder / "tables").mkdir(parents=True)
+        (folder / "tables" / "empty.csv").write_text("\n")
+    assert compare(left, right) == []
+    (right / "tables" / "empty.csv").write_text("gene\nA\n")
+    assert compare(left, right)
+
+
+def test_named_unstable_columns_do_not_disable_other_numeric_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(snapshot, "GOLDEN", tmp_path)
+    monkeypatch.setitem(snapshot.REGISTRY, "fixture", snapshot.Skill("unused", None, {
+        "default": snapshot.Case((), exclude={"tables/x.csv:unstable": "Backend exposes no seed"})}))
+    folder = tmp_path / "fixture/default"
+    folder.mkdir(parents=True)
+    meta = {"deterministic": False, "repeat_differences": [
+        "tables/x.csv.unstable: 3 values differ beyond rtol 1e-06"]}
+    (folder / "meta.json").write_text(json.dumps(meta))
+    assert snapshot.comparison_options("fixture", "default")["structure_only"] is False
+    meta["repeat_differences"].append("tables/x.csv.other: 1 values differ beyond rtol 1e-06")
+    (folder / "meta.json").write_text(json.dumps(meta))
+    assert snapshot.comparison_options("fixture", "default")["structure_only"] is True

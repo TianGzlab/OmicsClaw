@@ -1,60 +1,35 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── requirements.txt
-├── tables/
-│   ├── coords.csv
-│   ├── counts.csv
-│   ├── significant_svgs.csv
-│   ├── sparkx_results.csv
-│   ├── svg_observation_metrics.csv
-│   ├── svg_results.csv
-│   ├── svg_run_summary.csv
-│   ├── top_svg_scores.csv
-│   ├── top_svg_spatial_points.csv
-│   └── top_svg_umap_points.csv
-└── figures/
-    ├── moran_ranking.png
-    ├── svg_score_vs_significance.png
-    ├── svg_significance_distribution.png
-    ├── top_svg_scores.png
-    ├── top_svg_spatial.png
-    └── top_svg_umap.png
-```
+Functions return the same AnnData, native score DataFrames and a Figure.
+All methods store `uns['spatial_genes_results']` and
+`uns['spatial_genes_summary']`; Moran's I also stores `uns['moranI']`.
+The CLI removes the transient JSON diagnostics before writing `processed.h5ad`.
 
-## File contents
+The CLI writes `processed.h5ad`, `report.md`, `result.json`, `reproducibility/commands.sh`,
+`reproducibility/requirements.txt` and `reproducibility/r_visualization.sh`.
 
-- `tables/coords.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/counts.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/significant_svgs.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/sparkx_results.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/svg_observation_metrics.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/svg_results.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/svg_run_summary.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/top_svg_scores.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/top_svg_spatial_points.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `tables/top_svg_umap_points.csv` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `figures/moran_ranking.png` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `figures/svg_score_vs_significance.png` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `figures/svg_significance_distribution.png` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `figures/top_svg_scores.png` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `figures/top_svg_spatial.png` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `figures/top_svg_umap.png` — written by `spatial_genes.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_genes.py`.
-- `manifest.json` — written by `spatial_genes.py`.
-- `processed.h5ad` — written by `spatial_genes.py`.
-- `r_visualization.sh` — written by `spatial_genes.py`.
-- `requirements.txt` — written by `spatial_genes.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Tables
 
-## Notes
+- `tables/svg_results.csv`: native method scores and significance columns;
+  their names are recorded in the summary.
+- `tables/top_svg_scores.csv`: ranked display selection.
+- `tables/significant_svgs.csv`: the selected significance threshold.
+- `tables/svg_observation_metrics.csv`: gallery metrics when available.
+- `tables/svg_run_summary.csv`: method and diagnostic metadata.
+- `tables/top_svg_spatial_points.csv` and `tables/top_svg_umap_points.csv`:
+  only when the corresponding coordinates exist.
 
-Auto-generated from `spatial_genes.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+SPARK-X's counts, coordinates and R result CSVs are temporary exchange files.
+They are deleted with the temporary directory, not delivered under tables.
+
+## Conditional figures
+
+- `figures/top_svg_spatial.png`: selected genes and spatial coordinates.
+- `figures/top_svg_umap.png`: selected genes and UMAP.
+- `figures/top_svg_scores.png`: score column available.
+- `figures/svg_score_vs_significance.png`: score and significance columns.
+- `figures/svg_significance_distribution.png`: significance column available.
+- `figures/moran_ranking.png`: Moran's I results in uns.
+
+The gallery also writes `figure_data/manifest.json` and per-plot data. Plot
+failures are logged; optional panels are not unconditional outputs.

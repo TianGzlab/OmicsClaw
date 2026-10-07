@@ -1046,8 +1046,11 @@ def main():
     print("="*60 + "\n")
 
     # Dispatch to the chosen algorithm via _lib
-    summary = dispatch_method(
-        args.method, adata,
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    library.identify(
+        adata, method=args.method, refine=args.refine,
+        random_state=42 if args.method in {"stagate", "graphst", "cellcharter"} else 0,
         resolution=args.resolution,
         spatial_weight=args.spatial_weight,
         n_domains=args.n_domains,  # Safe variable
@@ -1068,13 +1071,8 @@ def main():
         use_rep=args.use_rep,
     )
 
-    if args.refine:
-        logger.info("Applying spatial KNN refinement ...")
-        refined = refine_spatial_domains(adata)
-        adata.obs["spatial_domain"] = pd.Categorical(refined)
-        summary["domain_counts"] = adata.obs["spatial_domain"].value_counts().to_dict()
-        summary["n_domains"] = adata.obs["spatial_domain"].nunique()
-        summary["refined"] = True
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state", None)
 
     params = {"method": args.method, "resolution": args.resolution,
               "spatial_weight": args.spatial_weight, "refine": args.refine}

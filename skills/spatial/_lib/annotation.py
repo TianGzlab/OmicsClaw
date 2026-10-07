@@ -27,6 +27,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -91,7 +92,7 @@ def _get_counts_layer(adata) -> str | None:
         return "counts"
     if adata.raw is not None:
         logger.info("No 'counts' layer found; copying from adata.raw")
-        adata.layers["counts"] = adata.raw.X.copy()
+        adata.layers["counts"] = adata.raw[:, adata.var_names].X.copy()
         return "counts"
     return None
 
@@ -145,6 +146,7 @@ def annotate_marker_based(
     overlap_normalize: str | None = "reference",
     adj_pval_threshold: float | None = None,
     min_score: float = 0.05,
+    random_state: int = 0,
 ) -> dict:
     """Score-based cell type annotation using cluster marker genes.
 
@@ -186,6 +188,7 @@ def annotate_marker_based(
         method=rank_method,
         n_genes=n_rank_genes,
         use_raw=False,
+        **({"random_state": random_state} if rank_method == "logreg" else {}),
     )
 
     marker_signatures = {label: sorted(set(genes)) for label, genes in get_default_signatures(species).items()}
@@ -248,8 +251,9 @@ def annotate_marker_based(
 
 
 def annotate_tangram(
-    adata, *, reference_path: str, cell_type_key: str = "cell_type",
+    adata, *, reference_path: str | None = None, reference=None, cell_type_key: str = "cell_type",
     n_epochs: int = 500, device: str = "auto", n_train_genes: int = 2000,
+    random_state: int = 0,
 ) -> dict:
     """Transfer cell type labels from scRNA-seq reference using Tangram.
 
@@ -267,7 +271,7 @@ def annotate_tangram(
     import torch
 
     logger.info("Loading reference data: %s", reference_path)
-    adata_ref = sc.read_h5ad(reference_path)
+    adata_ref = reference.copy() if reference is not None else sc.read_h5ad(reference_path)
 
     if cell_type_key not in adata_ref.obs.columns:
         raise ValueError(f"Cell type key '{cell_type_key}' not in reference")
@@ -275,6 +279,7 @@ def annotate_tangram(
     if n_train_genes < 0:
         raise ValueError("n_train_genes must be >= 0")
 
+    fallback = {}
     if n_train_genes == 0:
         training_genes = list(adata_ref.var_names)
     elif "highly_variable" in adata_ref.var.columns:
@@ -283,7 +288,9 @@ def annotate_tangram(
         logger.info("Computing highly variable genes for reference...")
         try:
             sc.pp.highly_variable_genes(adata_ref, n_top_genes=n_train_genes, flavor="seurat_v3")
-        except Exception:
+        except Exception as exc:
+            warnings.warn(f"Seurat v3 HVG selection failed; using Seurat dispersion: {exc}", RuntimeWarning, stacklevel=2)
+            fallback = {"requested_method": "seurat_v3_hvg", "executed_method": "seurat_hvg", "fallback_reason": str(exc)}
             sc.pp.highly_variable_genes(adata_ref, n_top_genes=n_train_genes)
         training_genes = list(adata_ref.var_names[adata_ref.var["highly_variable"]])[:n_train_genes]
 
@@ -296,7 +303,7 @@ def annotate_tangram(
     if spatial_key and spatial_key not in adata_sp.obsm:
         adata_sp.obsm[spatial_key] = adata.obsm[spatial_key].copy()
 
-    common_genes = list(set(training_genes) & set(adata_sp.var_names))
+    common_genes = sorted(set(training_genes) & set(adata_sp.var_names))
     if len(common_genes) < 50:
         raise ValueError(f"Too few overlapping HVGs ({len(common_genes)}) between reference and spatial data")
 
@@ -318,6 +325,7 @@ def annotate_tangram(
         mode="cells",
         num_epochs=n_epochs,
         device=resolved_device,
+        random_state=random_state,
     )
     
     logger.info("Projecting cell type annotations ...")
@@ -342,6 +350,7 @@ def annotate_tangram(
         "cell_type_counts": counts, "n_training_genes": len(common_genes),
         "n_epochs": n_epochs, "device": resolved_device,
         "cell_type_key": cell_type_key,
+        **fallback,
     }
 
 
@@ -351,7 +360,7 @@ def annotate_tangram(
 
 
 def annotate_scanvi(
-    adata, *, reference_path: str, cell_type_key: str = "cell_type",
+    adata, *, reference_path: str | None = None, reference=None, cell_type_key: str = "cell_type",
     batch_key: str | None = None, layer: str | None = "counts",
     n_hidden: int = 128, n_latent: int = 10, n_layers: int = 1,
     max_epochs: int = 100,
@@ -368,19 +377,19 @@ def annotate_scanvi(
     import scvi
 
     logger.info("Loading reference: %s", reference_path)
-    adata_ref = sc.read_h5ad(reference_path)
+    adata_ref = reference.copy() if reference is not None else sc.read_h5ad(reference_path)
 
     if cell_type_key not in adata_ref.obs.columns:
         raise ValueError(f"'{cell_type_key}' not found in reference adata.obs")
 
-    common_genes = list(set(adata_ref.var_names) & set(adata.var_names))
+    common_genes = sorted(set(adata_ref.var_names) & set(adata.var_names))
     if len(common_genes) < 100:
         raise ValueError(f"Insufficient gene overlap: {len(common_genes)} common genes")
 
     # Filter to highly variable genes to vastly improve VAE speed and accuracy
     if "highly_variable" in adata_ref.var.columns:
         ref_hvgs = set(adata_ref.var_names[adata_ref.var["highly_variable"]])
-        common_hvgs = list(set(common_genes) & ref_hvgs)
+        common_hvgs = sorted(set(common_genes) & ref_hvgs)
         if len(common_hvgs) > 500:
             logger.info("Restricting scANVI to %d overlapping highly variable genes", len(common_hvgs))
             common_genes = common_hvgs

@@ -1154,27 +1154,6 @@ def main():
         print("ERROR: Provide --input or --demo", file=sys.stderr)
         sys.exit(1)
 
-    if args.cluster_key not in adata.obs.columns:
-        if args.cluster_key != "leiden":
-            parser.error(
-                f"--cluster-key '{args.cluster_key}' not found in adata.obs. "
-                "Use an existing cluster label or omit it to auto-compute 'leiden'."
-            )
-
-        logger.info("No '%s' column — running minimal preprocessing", args.cluster_key)
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-        n_hvg = min(2000, max(2, adata.n_vars - 1))
-        sc.pp.highly_variable_genes(adata, n_top_genes=n_hvg, flavor="seurat")
-        adata_hvg = adata[:, adata.var["highly_variable"]].copy()
-        sc.pp.scale(adata_hvg, max_value=10)
-        n_comps = min(50, adata_hvg.n_vars - 1, adata_hvg.n_obs - 1)
-        n_comps = max(2, n_comps)
-        sc.tl.pca(adata_hvg, n_comps=n_comps)
-        adata.obsm["X_pca"] = adata_hvg.obsm["X_pca"]
-        sc.pp.neighbors(adata, n_neighbors=15, n_pcs=min(n_comps, 30))
-        sc.tl.leiden(adata, resolution=1.0, flavor="igraph")
-
     params, method_kwargs = _collect_run_configuration(args)
 
     if args.method in COUNT_BASED_METHODS and "counts" not in adata.layers:
@@ -1191,7 +1170,10 @@ def main():
                 "Ensure preprocessing saves raw counts: adata.layers['counts'] = adata.X.copy()"
             )
 
-    summary = run_condition_comparison(
+    from skills._sdk.notebook import load_skill
+
+    library = load_skill(SKILL_NAME)
+    adata = library.compare_conditions(
         adata,
         condition_key=args.condition_key,
         sample_key=args.sample_key,
@@ -1204,6 +1186,7 @@ def main():
         log2fc_threshold=args.log2fc_threshold,
         **method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
 
     gallery_context = _prepare_condition_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

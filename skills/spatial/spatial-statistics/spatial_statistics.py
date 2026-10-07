@@ -1933,11 +1933,15 @@ def main():
         _ensure_groupby_column(adata, groupby=args.cluster_key, parser=parser)
 
     params, method_kwargs = _collect_run_configuration(args)
-    summary = run_statistics(
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    library.analyze(
         adata,
         analysis_type=args.analysis_type,
+        random_state=method_kwargs.pop("seed", 123),
         **method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
     summary["n_cells"] = int(adata.n_obs)
     summary["n_features"] = int(adata.n_vars)
     gallery_context = _prepare_statistics_gallery_context(adata, summary)

@@ -4,16 +4,16 @@
 
 ## 范围与顺序
 
-当前 88 个技能中，单细胞 30 个已经完成分类：27 个函数库，3 个保留 CLI。其他域尚有空间 17、bulk RNA-seq 14、基因组 10、蛋白组 8、代谢组 8、文献 1 个。本轮从空间预处理开始，不把尚未执行的批次列为完成。
+当前 88 个技能中，单细胞 30 个已经完成分类：27 个函数库，3 个保留 CLI。其他域尚有空间 17、bulk RNA-seq 14、基因组 10、蛋白组 8、代谢组 8、文献 1 个。用户在 S1 后确认继续完成其余 16 个空间技能，最后统一合并 main 并推送；实施可按独立批次交给子 agent，最终仍须独立审核。
 
 | 批次 | 技能 | 状态 |
 |---|---|---|
 | S1 | spatial-preprocess | 本地验收完成，独立审核已关闭 |
-| S2 | spatial-de、spatial-enrichment、spatial-genes | 待迁移 |
-| S3 | spatial-annotate、spatial-domains、spatial-microenvironment-subset、spatial-statistics | 待迁移 |
-| S4 | spatial-integrate、spatial-register、spatial-condition | 待迁移 |
-| S5 | spatial-deconv、spatial-communication、spatial-cnv、spatial-trajectory、spatial-velocity | 待迁移，逐方法核验可选后端 |
-| S6 | spatial-raw-processing | 待分类，外部工具路径优先保留 CLI |
+| S2 | spatial-de、spatial-enrichment、spatial-genes | 实施与验收中 |
+| S3 | spatial-annotate、spatial-domains、spatial-microenvironment-subset、spatial-statistics | 实施与验收中 |
+| S4 | spatial-integrate、spatial-register、spatial-condition | 实施与验收中 |
+| S5 | spatial-deconv、spatial-communication、spatial-cnv、spatial-trajectory、spatial-velocity | 实施与验收中，逐方法记录可选后端限制 |
+| S6 | spatial-raw-processing | 保留 CLI_ONLY；合成示例执行与 replay 已通过，真实 FASTQ 未验收 |
 
 各批次开始前检查现有算法和依赖，不承诺缺包、数据库或真实输入的后端已经通过验收。文献技能是否适合函数库单独判断，不计作组学模态。
 

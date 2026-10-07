@@ -1047,13 +1047,17 @@ def main() -> None:
     params, method_kwargs = _collect_run_configuration(args)
     params["slice_key"] = resolved_slice_key
 
-    summary = run_registration(
+    from skills._sdk.notebook import load_skill
+
+    library = load_skill(SKILL_NAME)
+    adata = library.register(
         adata,
         method=args.method,
         slice_key=resolved_slice_key,
         reference_slice=args.reference_slice,
         **method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
 
     gallery_context = _prepare_register_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

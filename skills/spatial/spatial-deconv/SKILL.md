@@ -22,131 +22,116 @@ tags:
 
 ## When to use
 
-The user has a Visium-style multi-cell-per-spot spatial AnnData PLUS a
-labelled scRNA reference AnnData and wants per-spot cell-type
-proportions. Eight backends:
+Estimate cell-type proportions for spatial spots using a labelled single-cell
+reference. Use spatial-annotate for discrete labels and spatial-domains for
+tissue regions. Every method requires a reference; the CLI default is cell2location.
 
-- `flashdeconv` (default) — ultra-fast O(N) CPU sketching. No GPU.
-- `cell2location` — Bayesian deep learning with spatial priors
-  (`--cell2location-n-epochs`, `--cell2location-detection-alpha`,
-  `--cell2location-n-cells-per-spot`). Requires `scvi-tools` +
-  `cell2location` + `torch`.
-- `rctd` — Robust Cell Type Decomposition (R / `spacexr`).
-- `destvi` — multi-resolution VAE (`--destvi-n-epochs`,
-  `--destvi-n-hidden` / `--destvi-n-latent` / `--destvi-n-layers`).
-  Requires `scvi-tools` + `torch`.
-- `stereoscope` — two-stage probabilistic VAE
-  (`--stereoscope-learning-rate`). Requires `scvi-tools` + `torch`.
-- `tangram` — gradient-based mapping (`--tangram-n-epochs`,
-  `--tangram-learning-rate`). Requires `tangram`.
-- `spotlight` — NMF-based with marker-gene priors
-  (`--spotlight-n-top`, `--spotlight-min-prop`, `--spotlight-weight-id`).
-- `card` — Conditional Autoregressive R-based deconvolution.
+## Use from a step
 
-For single-cell-per-spot platforms (Xenium / MERFISH) use
-`spatial-annotate`. For tissue-region detection (no reference needed)
-use `spatial-domains`.
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+spatial = read_input("spatial.h5ad")
+reference = read_input("reference.h5ad")
+library = load_skill("spatial-deconv")
+library.deconvolve(spatial, reference=reference, method="flashdeconv", random_state=0)
+write_output(library.proportions(spatial), "tables/proportions.csv")
+```
 
-## Inputs & Outputs
+[examples/example_step.py](examples/example_step.py) uses an explicit synthetic
+reference and verifies known stripe identities; it is not a real-tissue benchmark.
+It sets lambda_spatial=10 for the small grid; the CLI default remains 5000.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `deconvolve(adata, *, reference, method: str='cell2location', cell_type_key: str='cell_type', random_state: int=0, **parameters)`
 
-- `tables/card_proportions.csv`
-- `tables/card_refined_proportions.csv`
-- `tables/celltype_diversity.csv`
-- `tables/deconv_run_summary.csv`
-- `tables/deconv_spatial_points.csv`
-- `tables/deconv_spot_metrics.csv`
-- `tables/deconv_umap_points.csv`
-- `tables/dominant_celltype.csv`
-- `tables/dominant_celltype_counts.csv`
-- `tables/mean_proportions.csv`
-- `tables/proportions.csv`
-- `tables/rctd_proportions.csv`
-- `tables/ref_celltypes.csv`
-- `tables/ref_counts.csv`
-- `tables/ref_meta.csv`
-- `tables/spatial_coords.csv`
-- `tables/spatial_counts.csv`
-- `tables/spotlight_proportions.csv`
-- `figures/assignment_margin_distribution.png`
-- `figures/assignment_margin_spatial.png`
-- `figures/celltype_diversity.png`
-- `figures/dominant_celltype.png`
-- `figures/dominant_celltype_distribution.png`
-- `figures/mean_proportions.png`
-- `figures/spatial_proportions.png`
-- `figures/umap_proportions.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `deconv_{method}_dominant_cell_type`, `deconv_{method}_dominant_proportion`; `obsm`: `deconvolution_{method}`
+Estimate proportions in place and return the same spatial AnnData.
 
-## Flow
+Count models read layers['counts'], raw or X in that order. FlashDeconv,
+Tangram and SPOTlight read nonnegative X. Reference data are copied.
+RCTD, SPOTlight and CARD retain their temporary R bridges; their wrappers
+do not expose a seed and results vary between runs.
 
-1. Load spatial AnnData + reference (`--reference` `.h5ad` with cell-type labels). For `flashdeconv` reference is optional (uses internal heuristic).
-2. `parser.error` validates `--input` / `--reference` / numeric flags.
-3. Dispatch to method; method-specific kwargs from `METHOD_PARAM_DEFAULTS`.
-4. Build proportions matrix; compute per-spot dominant cell-type + Shannon diversity.
-5. Save `processed.h5ad` (with `obsm["proportions"]`), tables, figures, `report.md`, `result.json`.
+:param adata: Spatial AnnData; input expression is retained.
+:param reference: Required labelled reference AnnData; load it with read_input.
+:param method: CLI default cell2location; flashdeconv, rctd, destvi,
+    stereoscope, tangram, spotlight and card are also supported.
+:param cell_type_key: Reference label column, CLI default cell_type.
+:param random_state: Seed for FlashDeconv/Tangram and scvi training, default 0.
+:param parameters: Method options in references/parameters.md, with CLI
+    prefixes removed; omitted options keep their CLI defaults.
+:returns: The same AnnData with deconvolution_<method>, labels and JSON diagnostics.
+:raises ValueError: Invalid method, expression, reference labels or backend proportions.
+:raises TypeError: Reference is not AnnData or a method option is unknown.
+:raises ImportError: A backend is missing; use install_skill_deps for its named package.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read method settings, reference overlap and result diagnostics.
+
+:param adata: AnnData returned by deconvolve.
+:param keep: True retains diagnostics; False removes them before CLI serialization.
+:returns: Diagnostic dict with matrix_sources, seed (None for R wrappers)
+    and optional CARD refinement tables.
+
+### `proportions(adata, *, method: str | None=None)`
+
+Return stored proportions with observation and cell-type identifiers.
+
+:param adata: AnnData returned by deconvolve; expression values are not read.
+:param method: None infers a sole stored method; specify it after multiple analyses.
+:returns: A DataFrame indexed by observation, with one column per reference label.
+:raises ValueError: No unique method can be inferred or label metadata are missing.
+
+### `proportions_figure(adata, *, method: str | None=None)`
+
+Plot mean proportions per reference cell type.
+
+:param adata: AnnData returned by deconvolve; reads the stored proportion matrix.
+:param method: None infers a sole method; specify it for multiple results.
+:returns: A matplotlib Figure without writing files.
+:raises ValueError: No unique stored method is available.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+FlashDeconv, cell2location, RCTD, DestVI, Stereoscope, Tangram, SPOTlight and CARD
+remain available. Python method options omit CLI prefixes; see
+[parameters](references/parameters.md) and [matrix conventions](references/methodology.md).
+The default cell2location budget is 30,000 epochs; select a method explicitly
+for a quick exploratory run.
 
 ## Gotchas
 
-- **All input + parameter validation goes through `parser.error` (exit code 2).** `spatial_deconv.py` for missing `--input`; for missing input path; for missing `--reference` on methods that need one; for missing reference path; for per-method numeric flag validation. Wrappers expecting `ValueError` need to catch exit-2.
-- **`--reference` is required for almost every method** (only `flashdeconv` can run without it). `spatial_deconv.py` raises `parser.error(f"--reference is required for method '{args.method}'")` for the others. The reference must have cell-type labels in `obs` (key auto-resolved from common names).
-- **`obsm["spatial"]` ↔ `obsm["X_spatial"]` sync in `_prepare_deconv_plot_state`.** Same dual-key pattern as spatial-domains — both keys exist after a run.
-- **`--cell2location-detection-alpha` must be > 0.** `spatial_deconv.py` enforces. The cell2location default (typically 200) is a regularisation strength — lower values mean less spatial smoothing.
-- **`--destvi-dropout-rate` is in `[0, 1)`, not `[0, 1]`.** `spatial_deconv.py` enforces strict-less-than-1. dropout=1 would zero out everything.
-- **R-backed methods (`rctd`, `card`) need a working R env.** Both rely on R packages (`spacexr` for RCTD, `CARD` for CARD). Missing R deps surface as ImportError at runtime, not at preflight.
+- `deconvolve` requires a labelled reference AnnData for every backend.
+- `deconvolve` validates finite nonnegative expression and integer counts for count models.
+- `proportions` needs a method when more than one result is stored; missing cell-type metadata raises an error.
+- `run_info` reports method parameters and seed. RCTD, SPOTlight and CARD retain unseeded R wrappers, so results vary between runs.
+- `--demo` exits with a reference-data requirement; use the executable synthetic step for demonstration.
 
-## Key CLI
+## Inputs and outputs
+
+Functions return AnnData, DataFrames and Figures. CLI output includes
+processed.h5ad, tables/proportions.csv, reports and conditional gallery files.
+See the complete [output contract](references/output_contract.md).
+
+## CLI
 
 ```bash
-# Demo (synthetic; flashdeconv default)
-python skills/spatial/spatial-deconv/spatial_deconv.py --demo --output /tmp/spatial_deconv_demo
-
-# FlashDeconv (CPU-only, fastest)
-python skills/spatial/spatial-deconv/spatial_deconv.py \
-  --input visium.h5ad --reference scrna_atlas.h5ad --output results/ \
-  --method flashdeconv
-
-# Cell2location (Bayesian, GPU)
-python skills/spatial/spatial-deconv/spatial_deconv.py \
-  --input visium.h5ad --reference scrna_atlas.h5ad --output results/ \
-  --method cell2location --cell2location-n-epochs 30000 \
-  --cell2location-n-cells-per-spot 8 --cell2location-detection-alpha 200
-
-# RCTD (R-backed)
-python skills/spatial/spatial-deconv/spatial_deconv.py \
-  --input visium.h5ad --reference scrna_atlas.h5ad --output results/ \
-  --method rctd --rctd-mode full
-
-# Tangram (gradient mapping)
-python skills/spatial/spatial-deconv/spatial_deconv.py \
-  --input visium.h5ad --reference scrna_atlas.h5ad --output results/ \
-  --method tangram --tangram-n-epochs 1000 --tangram-learning-rate 0.1
-
-# CARD (Conditional Autoregressive R deconv)
-python skills/spatial/spatial-deconv/spatial_deconv.py \
-  --input visium.h5ad --reference scrna_atlas.h5ad --output results/ \
-  --method card
+python skills/spatial/spatial-deconv/spatial_deconv.py --input spatial.h5ad --reference reference.h5ad --method flashdeconv --output results/deconv
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins; reference-data prep
-- `references/output_contract.md` — `obsm["proportions"]` / `obs["dominant_celltype"]` schema
-- Adjacent skills: `spatial-preprocess` (upstream — produces the input AnnData), `sc-cell-annotation` (upstream — labels the scRNA reference passed via `--reference`), `spatial-annotate` (parallel — for single-cell-per-spot platforms NOT spot deconvolution), `spatial-domains` (parallel — finds tissue regions WITHOUT a reference; complementary to deconv), `spatial-de` (downstream — DE between deconv-defined dominant-celltype groups)
+- [Parameters](references/parameters.md)
+- [Methodology](references/methodology.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
 `anndata`, `cell2location`, `flashdeconv`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `scvi-tools`, `seaborn`, `tangram-sc`, `torch`
+
+R backends need Rscript and spacexr (RCTD), SPOTlight or CARD.

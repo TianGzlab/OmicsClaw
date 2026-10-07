@@ -10,8 +10,8 @@
    profiles.
 4. **Local-first gene-set resolution**: supports built-in OmicsClaw signatures,
    local `.json` / `.gmt` files, and remote library resolution through GSEApy.
-5. **Deterministic fallback behavior**: if a remote gene-set library cannot be
-   resolved, OmicsClaw records a warning and falls back to a local library.
+5. A requested remote library must resolve successfully. Otherwise the run
+   raises and asks for a local file or an explicit built-in source.
 6. **Marker export**: writes the ranked marker table used as enrichment input
    for auditability and extension.
 7. **Score projection for visualization**: selected ssGSEA group scores are
@@ -34,8 +34,8 @@
 
 ## Input Matrix Convention
 
-The current wrapper uses log-normalized expression in `adata.X` for all three
-methods, but the statistical role differs:
+Marker ranking follows Scanpy's default: raw when present, otherwise X.
+ssGSEA reads log-normalized X. The statistical role differs:
 
 | Method | Input representation | Why |
 |--------|----------------------|-----|

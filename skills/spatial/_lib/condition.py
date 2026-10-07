@@ -63,7 +63,7 @@ def _get_counts_matrix(adata) -> np.ndarray:
         X = adata.layers["counts"]
         logger.info("Pseudobulk: using adata.layers['counts'] (raw counts)")
     elif adata.raw is not None:
-        X = adata.raw.X
+        X = adata.raw[:, adata.var_names].X
         logger.warning(
             "Pseudobulk: no 'counts' layer found; using adata.raw. "
             "Ensure adata.raw contains raw counts, not log-normalized values."
@@ -79,11 +79,9 @@ def _get_counts_matrix(adata) -> np.ndarray:
     if sparse.issparse(X):
         X = X.toarray()
     X = np.asarray(X)
-    if np.any(X < 0):
-        X = np.clip(X, 0, None)
-    if X.dtype.kind == "f":
-        X = np.round(X).astype(int)
-    return X
+    if not np.isfinite(X).all() or np.any(X < 0) or not np.allclose(X, np.round(X), atol=1e-8, rtol=0):
+        raise ValueError("Pseudobulk requires finite nonnegative integer counts; provide layers['counts']")
+    return X.astype(np.int64)
 
 
 def _validate_condition_design(adata, *, condition_key: str, sample_key: str) -> pd.Series:
@@ -318,6 +316,7 @@ def run_condition_comparison(
     comparison_rows: list[dict] = []
     skipped_contrasts: list[dict] = []
     method_used = method
+    fallbacks = []
 
     for cl, count_df in pb_dict.items():
         cond_strs = sample_condition.reindex(count_df.index).astype(str)
@@ -378,6 +377,10 @@ def run_condition_comparison(
                     )
                     de_df["method"] = "pydeseq2"
                 except Exception as exc:
+                    if isinstance(exc, ImportError):
+                        raise ImportError("PyDESeq2 is missing; use install_skill_deps for spatial-condition") from exc
+                    fallbacks.append({"cluster": str(cl), "contrast": f"{other_c}_vs_{ref}",
+                                      "requested": "pydeseq2", "executed": "wilcoxon", "reason": str(exc)})
                     logger.warning(
                         "PyDESeq2 failed for cluster %s (%s), falling back to Wilcoxon: %s",
                         cl,
@@ -476,4 +479,5 @@ def run_condition_comparison(
         "min_samples_per_condition": min_samples_per_condition,
         "fdr_threshold": fdr_threshold,
         "log2fc_threshold": log2fc_threshold,
+        **({"fallbacks": fallbacks} if fallbacks else {}),
     }

@@ -67,7 +67,7 @@ def detect_cluster_key(adata) -> str | None:
     return None
 
 
-def _ensure_diffmap(adata, *, min_components: int) -> int:
+def _ensure_diffmap(adata, *, min_components: int, random_state: int = 0) -> int:
     """Ensure diffusion map exists with enough components."""
     import scanpy as sc
 
@@ -76,7 +76,7 @@ def _ensure_diffmap(adata, *, min_components: int) -> int:
 
     max_components = max(2, min(adata.obsm["X_pca"].shape[1], adata.n_obs - 1))
     n_components = min(max(min_components, 2), max_components)
-    sc.tl.diffmap(adata, n_comps=n_components)
+    sc.tl.diffmap(adata, n_comps=n_components, random_state=random_state)
     return n_components
 
 
@@ -259,11 +259,12 @@ def _compute_dpt_pseudotime(
     root_cell_type: str | None,
     cluster_key: str | None,
     n_dcs: int,
+    random_state: int = 0,
 ) -> dict[str, Any]:
     """Compute DPT pseudotime and return core scalar summaries."""
     import scanpy as sc
 
-    _ensure_diffmap(adata, min_components=n_dcs + 1)
+    _ensure_diffmap(adata, min_components=n_dcs + 1, random_state=random_state)
     resolved_root_cell, root_idx = _resolve_root_cell(
         adata,
         root_cell=root_cell,
@@ -297,6 +298,7 @@ def run_dpt(
     root_cell_type: str | None = None,
     cluster_key: str | None = None,
     n_dcs: int = METHOD_PARAM_DEFAULTS["dpt"]["n_dcs"],
+    random_state: int = 0,
 ) -> dict[str, Any]:
     """Run diffusion pseudotime using scanpy."""
     dpt_summary = _compute_dpt_pseudotime(
@@ -305,6 +307,7 @@ def run_dpt(
         root_cell_type=root_cell_type,
         cluster_key=cluster_key,
         n_dcs=n_dcs,
+        random_state=random_state,
     )
     traj_genes_df = find_trajectory_genes(adata, pseudotime_key="dpt_pseudotime")
 
@@ -333,6 +336,7 @@ def run_cellrank(
     schur_components: int = METHOD_PARAM_DEFAULTS["cellrank"]["schur_components"],
     frac_to_keep: float = METHOD_PARAM_DEFAULTS["cellrank"]["frac_to_keep"],
     use_velocity: bool = METHOD_PARAM_DEFAULTS["cellrank"]["use_velocity"],
+    random_state: int = 0,
 ) -> dict[str, Any]:
     """Run CellRank macrostate / fate inference."""
     require("cellrank", feature="CellRank trajectory inference")
@@ -344,9 +348,12 @@ def run_cellrank(
         root_cell_type=root_cell_type,
         cluster_key=cluster_key,
         n_dcs=dpt_n_dcs,
+        random_state=random_state,
     )
 
     kernel_mode = "connectivity"
+    fallbacks = []
+    warnings_list = []
     effective_frac_to_keep = float(frac_to_keep)
     effective_schur_components = min(max(int(schur_components), 2), max(2, adata.n_obs - 1))
     effective_n_states = min(max(int(n_states), 2), effective_schur_components)
@@ -367,6 +374,7 @@ def run_cellrank(
             kernel_mode = "velocity+connectivity"
             logger.info("CellRank: using VelocityKernel(0.8) + ConnectivityKernel(0.2)")
         except Exception as exc:
+            fallbacks.append({"requested_method": "velocity+connectivity", "executed_method": "pseudotime+connectivity", "fallback_reason": str(exc)})
             logger.warning(
                 "VelocityKernel unavailable (%s); falling back to pseudotime / connectivity",
                 exc,
@@ -389,6 +397,7 @@ def run_cellrank(
                 "CellRank: using PseudotimeKernel(0.8) + ConnectivityKernel(0.2)"
             )
         except Exception as exc:
+            fallbacks.append({"requested_method": "pseudotime+connectivity", "executed_method": "connectivity", "fallback_reason": str(exc)})
             logger.warning(
                 "PseudotimeKernel unavailable (%s); using ConnectivityKernel only",
                 exc,
@@ -439,8 +448,10 @@ def run_cellrank(
                 if drivers is not None and not drivers.empty:
                     driver_genes[state] = drivers.head(10).index.astype(str).tolist()
             except Exception as exc:
+                warnings_list.append(f"Lineage drivers for {state}: {exc}")
                 logger.warning("CellRank lineage drivers failed for '%s': %s", state, exc)
     except Exception as exc:
+        warnings_list.append(f"Terminal-state/fate calculation: {exc}")
         logger.warning("CellRank terminal-state / fate computation failed: %s", exc)
 
     traj_genes_df = find_trajectory_genes(adata, pseudotime_key="dpt_pseudotime")
@@ -451,6 +462,8 @@ def run_cellrank(
         **dpt_summary,
         **_trajectory_gene_summary(traj_genes_df),
         "kernel_mode": kernel_mode,
+        **({"fallbacks": fallbacks} if fallbacks else {}),
+        **({"warnings": warnings_list} if warnings_list else {}),
         "macrostate_key": macro_key,
         "lineage_key": lineage_key,
         "n_macrostates": n_macrostates,
@@ -482,14 +495,17 @@ def run_palantir(
     knn: int = METHOD_PARAM_DEFAULTS["palantir"]["knn"],
     num_waypoints: int = METHOD_PARAM_DEFAULTS["palantir"]["num_waypoints"],
     max_iterations: int = METHOD_PARAM_DEFAULTS["palantir"]["max_iterations"],
+    random_state: int = 0,
+    waypoint_seed: int = 20,
 ) -> dict[str, Any]:
     """Run Palantir pseudotime and branch-entropy inference."""
     require("palantir", feature="Palantir trajectory inference")
-    import scanpy.external as sce
+    from palantir.core import run_palantir as fit_palantir
+    from palantir.utils import run_diffusion_maps, determine_multiscale_space, run_magic_imputation
 
     ensure_pca(adata)
     ensure_neighbors(adata)
-    _ensure_diffmap(adata, min_components=max(n_components, 2))
+    _ensure_diffmap(adata, min_components=max(n_components, 2), random_state=random_state)
 
     resolved_root_cell, _ = _resolve_root_cell(
         adata,
@@ -506,17 +522,24 @@ def run_palantir(
     effective_num_waypoints = min(max(int(num_waypoints), 10), adata.n_obs)
     effective_max_iterations = max(int(max_iterations), 1)
 
-    sce.tl.palantir(
-        adata,
-        n_components=effective_n_components,
-        knn=effective_knn,
+    diffusion = run_diffusion_maps(
+        pd.DataFrame(adata.obsm["X_pca"], index=adata.obs_names),
+        n_components=effective_n_components, knn=effective_knn, seed=random_state,
     )
-    pr_res = sce.tl.palantir_results(
-        adata,
+    multiscale = determine_multiscale_space(diffusion)
+    adata.layers["palantir_imp"] = np.asarray(run_magic_imputation(adata.to_df(), diffusion, n_steps=3))
+    adata.obsm["X_palantir_diff_comp"] = diffusion["EigenVectors"].to_numpy()
+    adata.uns["palantir_EigenValues"] = diffusion["EigenValues"].to_numpy()
+    adata.obsp["palantir_diff_op"] = diffusion["T"]
+    adata.obsm["X_palantir_multiscale"] = multiscale.to_numpy()
+    pr_res = fit_palantir(
+        multiscale,
         early_cell=resolved_root_cell,
         knn=effective_knn,
         num_waypoints=effective_num_waypoints,
         max_iterations=effective_max_iterations,
+        seed=waypoint_seed,
+        n_jobs=1,
     )
 
     pseudotime = pr_res.pseudotime.reindex(adata.obs_names).astype(float)
@@ -584,6 +607,8 @@ def run_trajectory(
     palantir_knn: int = METHOD_PARAM_DEFAULTS["palantir"]["knn"],
     palantir_num_waypoints: int = METHOD_PARAM_DEFAULTS["palantir"]["num_waypoints"],
     palantir_max_iterations: int = METHOD_PARAM_DEFAULTS["palantir"]["max_iterations"],
+    random_state: int = 0,
+    palantir_waypoint_seed: int = 20,
 ) -> dict[str, Any]:
     """Dispatch to the selected trajectory method."""
     n_cells = int(adata.n_obs)
@@ -600,6 +625,7 @@ def run_trajectory(
             root_cell_type=root_cell_type,
             cluster_key=cluster_key,
             n_dcs=dpt_n_dcs,
+            random_state=random_state,
         )
     elif method == "cellrank":
         result = run_cellrank(
@@ -612,6 +638,7 @@ def run_trajectory(
             schur_components=cellrank_schur_components,
             frac_to_keep=cellrank_frac_to_keep,
             use_velocity=cellrank_use_velocity,
+            random_state=random_state,
         )
     else:
         result = run_palantir(
@@ -623,6 +650,8 @@ def run_trajectory(
             knn=palantir_knn,
             num_waypoints=palantir_num_waypoints,
             max_iterations=palantir_max_iterations,
+            random_state=random_state,
+            waypoint_seed=palantir_waypoint_seed,
         )
 
     return {"n_cells": n_cells, "n_genes": n_genes, **result}

@@ -122,6 +122,14 @@ def compare_api(skill: str, case: str, produced: Path) -> list[str]:
     if summary.is_file():
         actual = json.loads(summary.read_text())
         recorded = json.loads((golden / "summary.json").read_text())
+        for entry in exclude:
+            if entry.startswith("summary.json:"):
+                parts = entry.split(":", 1)[1].split(".")
+                for value in (actual, recorded):
+                    for part in parts[:-1]:
+                        value = value.get(part, {}) if isinstance(value, dict) else {}
+                    if isinstance(value, dict):
+                        value.pop(parts[-1], None)
         expected = {key: recorded[key] for key in actual if key in recorded}
         problems += snapshot.compare_values(expected, actual, "api summary.json")
         if actual:

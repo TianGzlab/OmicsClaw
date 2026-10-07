@@ -954,13 +954,11 @@ def main():
     params, method_kwargs = _collect_run_configuration(args)
     logger.info("Running %s with parameters: %s", args.method, params)
 
-    if args.method == "marker_based":
-        summary = annotate_marker_based(adata, **method_kwargs)
-    elif args.method == "tangram":
-        summary = annotate_tangram(adata, **method_kwargs)
-    elif args.method == "scanvi":
-        summary = annotate_scanvi(adata, **method_kwargs)
-    elif args.method == "cellassign":
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    if "reference_path" in method_kwargs:
+        method_kwargs["reference"] = sc.read_h5ad(method_kwargs.pop("reference_path"))
+    if args.method == "cellassign":
         if args.model:
             with open(args.model, encoding="utf-8") as f:
                 marker_genes = json.load(f)
@@ -968,11 +966,13 @@ def main():
         else:
             marker_genes = get_default_signatures(args.species)
             summary_marker_source = f"default_signatures:{args.species}"
-        summary = annotate_cellassign(adata, marker_genes=marker_genes, **method_kwargs)
+        method_kwargs["marker_genes"] = marker_genes
+    library.annotate(adata, method=args.method, **method_kwargs)
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state", None)
+    if args.method == "cellassign":
         summary["marker_source"] = summary_marker_source
         summary["species"] = args.species
-    else:
-        print(f"ERROR: Unknown method {args.method}", file=sys.stderr); sys.exit(1)
 
     generate_figures(adata, output_dir, summary)
     export_tables(output_dir, adata, summary)

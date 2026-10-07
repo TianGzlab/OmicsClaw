@@ -19,116 +19,106 @@ tags:
 
 ## When to use
 
-The user has a preprocessed spatial AnnData (`obsm["X_pca"]` or
-neighbour graph populated) and wants pseudotime / branching
-trajectories. Three backends:
+Infer pseudotime from log-normalized spatial expression with an existing PCA and neighbors graph. DPT is the default; CellRank adds fate probabilities and Palantir adds waypoint branch probabilities.
 
-- `dpt` (default) — diffusion pseudotime via `sc.tl.dpt`. Cheap.
-  Tunable `--dpt-n-dcs`.
-- `cellrank` — GPCCA macrostates, terminal-state probabilities,
-  fate maps, driver-gene ranking. Tunables `--cellrank-n-states`,
-  `--cellrank-frac-to-keep`, `--cellrank-schur-components`.
-- `palantir` — waypoint sampling + multi-scale Markov for branch
-  probabilities. Tunables `--palantir-num-waypoints`,
-  `--palantir-knn`, `--palantir-n-components`,
-  `--palantir-max-iterations`.
+## Use from a step
 
-Cluster column (`--cluster-key`) auto-detected from `leiden` /
-`cell_type` / `celltype` / `annotation` / `cluster` / `clusters`.
-For RNA-velocity-driven trajectories use `spatial-velocity`.
+```python
+from skills._sdk.notebook import load_skill
+library = load_skill("spatial-trajectory")
+library.trajectory(adata, root_cell=str(adata.obs_names[0]))
+```
 
-## Inputs & Outputs
+Run `examples/example_step.py` with the step runner for a synthetic, executable example.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `X_pca`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `trajectory(adata, *, method: str='dpt', cluster_key: str | None=None, root_cell: str | None=None, root_cell_type: str | None=None, method_params: dict | None=None, random_state: int=0, palantir_waypoint_seed: int=20)`
 
-- `tables/cellrank_driver_genes.csv`
-- `tables/palantir_branch_probs.csv`
-- `tables/trajectory_cluster_summary.csv`
-- `tables/trajectory_diffmap_points.csv`
-- `tables/trajectory_driver_genes.csv`
-- `tables/trajectory_fate_probabilities.csv`
-- `tables/trajectory_fate_probabilities_wide.csv`
-- `tables/trajectory_genes.csv`
-- `tables/trajectory_run_summary.csv`
-- `tables/trajectory_spatial_points.csv`
-- `tables/trajectory_summary.csv`
-- `tables/trajectory_terminal_states.csv`
-- `tables/trajectory_umap_points.csv`
-- `figures/cellrank_fate_circular.png`
-- `figures/cellrank_fate_heatmap.png`
-- `figures/cellrank_fate_map.png`
-- `figures/cellrank_gene_trends.png`
-- `figures/trajectory_cluster_summary.png`
-- `figures/trajectory_diffmap.png`
-- `figures/trajectory_entropy_distribution.png`
-- `figures/trajectory_fate_probability_distribution.png`
-- `figures/trajectory_genes_barplot.png`
-- `figures/trajectory_pseudotime_distribution.png`
-- `figures/trajectory_pseudotime_embedding.png`
-- `figures/trajectory_pseudotime_spatial.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `dpt_pseudotime`, `traj_terminal_state`, `traj_fate_max_prob`, `traj_fate_entropy`, `palantir_pseudotime`, `palantir_entropy`; `obsm`: `palantir_branch_probs`; `uns`: `iroot`, `palantir_waypoints`, `palantir_branch_prob_columns`
+Infer pseudotime in place from log-normalized X and an existing PCA/graph.
 
-## Flow
+DPT and CellRank add dpt_pseudotime; Palantir adds palantir_pseudotime.
+CellRank fate calculations can be incomplete; inspect run_info warnings.
 
-1. Load AnnData (`--input`) or build a demo. Auto-detect `--cluster-key` from candidates if not passed.
-2. Pick / pin root cell: `--root-cell <barcode>` or auto-pick via expression-rank; write `uns["iroot"]` (`_lib/trajectory.py`).
-3. Run chosen backend:
-   - `dpt`: `sc.tl.dpt(adata, n_dcs=...)` → `obs["dpt_pseudotime"]`.
-   - `cellrank`: build kernel, GPCCA macrostates, terminal states, fate probabilities, driver genes.
-   - `palantir`: waypoint sampling, multi-scale Markov, branch probabilities.
-4. Compute trajectory genes (correlation with pseudotime) + cluster-mean / median pseudotime summary.
-5. Render embedding / spatial / diffmap / fate / gene-trend plots.
-6. Save tables + `processed.h5ad` + report.
+:param adata: AnnData with X_pca and a neighbors graph from preprocessing.
+:param method: dpt (CLI default), cellrank or palantir.
+:param cluster_key: Observation annotation; None detects leiden/cell_type/cluster.
+:param root_cell: Starting barcode; None picks the maximum first diffusion component.
+:param root_cell_type: Restrict automatic root selection to this annotation value.
+:param method_params: Backend options using the CLI names with underscores;
+    None retains its defaults, such as dpt_n_dcs=10. See references/parameters.md.
+:param random_state: Seed for diffusion maps and supported backend sampling, default 0.
+:param palantir_waypoint_seed: Palantir waypoint sampling seed, 20 to preserve
+    the original CLI backend default independently from diffusion-map seed 0.
+:returns: The same AnnData with pseudotime and JSON run diagnostics.
+:raises ValueError: Missing preprocessing, root or annotation, or invalid method.
+:raises ImportError: A backend is missing; use install_skill_deps.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read the last run's root, effective parameters and method-specific results.
+
+:param adata: AnnData returned by trajectory.
+:param keep: True keeps diagnostics; False removes them for CLI serialization.
+:returns: A dictionary, including trajectory gene tables when available.
+
+### `pseudotime_table(adata) -> pd.DataFrame`
+
+Return per-spot pseudotime columns in observation order.
+
+:param adata: AnnData after trajectory inference.
+:returns: A barcode-indexed table of available DPT/Palantir pseudotime and entropy.
+
+### `trajectory_genes(adata) -> pd.DataFrame`
+
+Return genes correlated with pseudotime from the last inference.
+
+:param adata: AnnData returned by trajectory; expression was read from X.
+:returns: Gene, correlation, pvalue, fdr and direction columns, or an empty table.
+
+### `pseudotime_figure(adata, *, basis: str='spatial')`
+
+Plot inferred pseudotime over coordinates without writing a file.
+
+:param adata: AnnData returned by trajectory.
+:param basis: Coordinate key, spatial by default; X_umap is also supported.
+:returns: A matplotlib Figure owned by the caller.
+:raises KeyError: Missing coordinates or pseudotime.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+DPT uses 10 diffusion components. Pass CLI-style option names in `method_params`, such as `{'dpt_n_dcs': 5}`. CellRank and Palantir dependencies load only when selected.
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
 
 ## Gotchas
 
-- **`--cluster-key` is auto-detected from a candidate list.** `_lib/trajectory.py` (`_CLUSTER_KEY_CANDIDATES`) tries `leiden` → `cell_type` → `celltype` → `annotation` → `cluster` → `clusters` and the auto-detect returns `None` silently when no candidate column has ≥ 2 unique values — cluster summaries then run with `cluster_key = None`. By contrast, an explicit `--cluster-key X` whose column is missing raises `ValueError` at `spatial_trajectory.py`. Pass an explicit key when you want a hard failure on a typo.
-- **Both `dpt` and `cellrank` write `obs["dpt_pseudotime"]`.** `_lib/trajectory.py` populates it via `sc.tl.dpt`; CellRank reuses the same call. Palantir writes `obs["palantir_pseudotime"]` instead — **don't expect `dpt_pseudotime` from a Palantir run**.
-- **Palantir branch probabilities are conditional + dual-stored.** `_lib/trajectory.py` writes `obsm["palantir_branch_probs"]` (numeric matrix) AND `uns["palantir_branch_prob_columns"]` (terminal-state column names) ONLY when `branch_probs` is non-empty (`if not branch_probs.empty:`). Single-terminal-state runs leave both keys absent. The cells × terminals matrix is also exported as `tables/palantir_branch_probs.csv` when present.
-- **CellRank `traj_*` keys are CellRank-only.** `spatial_trajectory.py` writes `obs["traj_terminal_state"]` / `obs["traj_fate_max_prob"]` / `obs["traj_fate_entropy"]` only when the CellRank branch executes — DPT and Palantir runs leave those keys absent.
-- **`uns["iroot"]` is an integer index, not a barcode.** `_lib/trajectory.py` writes the integer position into `obs_names`. Downstream tools that reload the AnnData and expect a string barcode need `adata.obs_names[adata.uns["iroot"]]`.
+- `trajectory` requires both `obsm['X_pca']` and `uns['neighbors']`.
+- `run_info` identifies the root barcode and pseudotime column; `uns['iroot']` is an integer position.
+- `trajectory_genes` reads X and returns FDR-filtered Spearman correlations.
+- `palantir_branch_probs` is present only when the backend returns branches.
 
-## Key CLI
+## Inputs and outputs
+
+`trajectory` returns the same AnnData. `pseudotime_table` and `trajectory_genes` return DataFrames; `pseudotime_figure` returns a Figure. CLI output includes `processed.h5ad`, reports and conditional trajectory/fate tables and plots.
+The full file inventory and conditions are in [output contract](references/output_contract.md).
+
+## CLI
 
 ```bash
-# Demo
-python skills/spatial/spatial-trajectory/spatial_trajectory.py --demo --output /tmp/traj_demo
-
-# DPT (default)
-python skills/spatial/spatial-trajectory/spatial_trajectory.py \
-  --input preprocessed.h5ad --output results/ \
-  --method dpt --cluster-key leiden --dpt-n-dcs 10
-
-# CellRank with explicit root cell
-python skills/spatial/spatial-trajectory/spatial_trajectory.py \
-  --input preprocessed.h5ad --output results/ \
-  --method cellrank --root-cell BARCODE_42 \
-  --cellrank-n-states 5 --cellrank-frac-to-keep 0.3
-
-# Palantir
-python skills/spatial/spatial-trajectory/spatial_trajectory.py \
-  --input preprocessed.h5ad --output results/ \
-  --method palantir --palantir-num-waypoints 1200 --palantir-knn 30
+python skills/spatial/spatial-trajectory/spatial_trajectory.py --input input.h5ad --output results/
 ```
+
+The CLI retains reports and the figure gallery. Function calls do not save files.
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins
-- `references/output_contract.md` — per-method `obs` / `obsm` / `uns` keys
-- Adjacent skills: `spatial-preprocess` (upstream), `spatial-domains` (upstream — provides `obs["leiden"]`), `spatial-velocity` (parallel — RNA-velocity-driven dynamics), `sc-pseudotime` (parallel — non-spatial), `spatial-condition` (downstream — DE between trajectory branches)
+- `spatial-preprocess` supplies expression preprocessing.
+- [Output contract](references/output_contract.md) lists method-specific files and AnnData fields.
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `cellrank`, `matplotlib`, `numpy`, `palantir`, `pandas`, `scanpy`, `scipy`, `scvelo`, `seaborn`, `statsmodels`

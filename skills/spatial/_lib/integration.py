@@ -37,10 +37,6 @@ import logging
 
 import numpy as np
 
-from skills._sdk.runtime_env import ensure_runtime_cache_dirs
-
-ensure_runtime_cache_dirs()
-
 import scanpy as sc
 
 from .adata_utils import ensure_neighbors, ensure_pca
@@ -116,6 +112,7 @@ def integrate_harmony(
     theta: float = METHOD_PARAM_DEFAULTS["harmony"]["theta"],
     lamb: float = METHOD_PARAM_DEFAULTS["harmony"]["lambda"],
     max_iter_harmony: int = METHOD_PARAM_DEFAULTS["harmony"]["max_iter_harmony"],
+    random_state: int = 0,
 ) -> dict:
     """Run Harmony integration on PCA embeddings.
 
@@ -140,13 +137,14 @@ def integrate_harmony(
         theta=theta,
         lamb=lamb,
         max_iter_harmony=max_iter_harmony,
+        random_state=random_state,
     )
     corrected = ho.Z_corr
     if corrected.shape[0] != adata.n_obs and corrected.shape[1] == adata.n_obs:
         corrected = corrected.T
     adata.obsm["X_pca_harmony"] = corrected
-    sc.pp.neighbors(adata, use_rep="X_pca_harmony", n_neighbors=15)
-    sc.tl.umap(adata)
+    sc.pp.neighbors(adata, use_rep="X_pca_harmony", n_neighbors=15, random_state=random_state)
+    sc.tl.umap(adata, random_state=random_state)
     return {
         "method": "harmony",
         "embedding_key": "X_pca_harmony",
@@ -166,6 +164,7 @@ def integrate_bbknn(
     neighbors_within_batch: int = METHOD_PARAM_DEFAULTS["bbknn"]["neighbors_within_batch"],
     n_pcs: int = METHOD_PARAM_DEFAULTS["bbknn"]["n_pcs"],
     trim: int | None = METHOD_PARAM_DEFAULTS["bbknn"]["trim"],
+    random_state: int = 0,
 ) -> dict:
     """Run BBKNN batch-balanced nearest neighbours.
 
@@ -193,7 +192,7 @@ def integrate_bbknn(
         n_pcs=effective_n_pcs,
         trim=trim,
     )
-    sc.tl.umap(adata)
+    sc.tl.umap(adata, random_state=random_state)
     return {
         "method": "bbknn",
         "embedding_key": "X_pca",
@@ -214,6 +213,7 @@ def integrate_scanorama(
     sigma: float = METHOD_PARAM_DEFAULTS["scanorama"]["sigma"],
     alpha: float = METHOD_PARAM_DEFAULTS["scanorama"]["alpha"],
     batch_size: int = METHOD_PARAM_DEFAULTS["scanorama"]["batch_size"],
+    random_state: int = 0,
 ) -> dict:
     """Run Scanorama integration via Scanpy's external API.
 
@@ -262,8 +262,8 @@ def integrate_scanorama(
         adata.obsm["X_scanorama"] = restored
     else:
         adata.obsm["X_scanorama"] = corrected
-    sc.pp.neighbors(adata, use_rep="X_scanorama")
-    sc.tl.umap(adata)
+    sc.pp.neighbors(adata, use_rep="X_scanorama", random_state=random_state)
+    sc.tl.umap(adata, random_state=random_state)
     return {
         "method": "scanorama",
         "embedding_key": "X_scanorama",
@@ -337,6 +337,7 @@ def run_integration(
     *,
     method: str = "harmony",
     batch_key: str = "batch",
+    random_state: int = 0,
     **method_kwargs,
 ) -> dict:
     """Run multi-sample integration. Returns summary dict."""
@@ -363,23 +364,24 @@ def run_integration(
             "  python skills/spatial/spatial-preprocess/spatial_preprocess.py --input data.h5ad --output results/"
         )
     if "X_umap" not in adata.obsm:
-        ensure_neighbors(adata)
-        sc.tl.umap(adata)
+        if "neighbors" not in adata.uns:
+            sc.pp.neighbors(adata, random_state=random_state)
+        sc.tl.umap(adata, random_state=random_state)
         
     umap_before = adata.obsm["X_umap"].copy()
     mixing_profile_before = compute_batch_mixing_profile(adata, batch_key)
     mixing_before = float(mixing_profile_before.mean()) if mixing_profile_before.size else 0.0
 
     if method == "harmony":
-        result = integrate_harmony(adata, batch_key, **method_kwargs)
+        result = integrate_harmony(adata, batch_key, random_state=random_state, **method_kwargs)
     elif method == "bbknn":
-        result = integrate_bbknn(adata, batch_key, **method_kwargs)
+        result = integrate_bbknn(adata, batch_key, random_state=random_state, **method_kwargs)
     elif method == "scanorama":
-        result = integrate_scanorama(adata, batch_key, **method_kwargs)
+        result = integrate_scanorama(adata, batch_key, random_state=random_state, **method_kwargs)
 
     # Prevent clustering collision overrides with existing labels
     if "leiden" not in adata.obs.columns:
-        sc.tl.leiden(adata, resolution=1.0, flavor="igraph")
+        sc.tl.leiden(adata, resolution=1.0, flavor="igraph", random_state=random_state)
 
     mixing_profile_after = compute_batch_mixing_profile(adata, batch_key)
     mixing_after = float(mixing_profile_after.mean()) if mixing_profile_after.size else 0.0

@@ -1,106 +1,44 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── requirements.txt
-├── tables/
-│   ├── analysis_results.csv
-│   ├── analysis_summary.csv
-│   ├── bivariate_moran_summary.csv
-│   ├── centrality_scores.csv
-│   ├── cluster_summary.csv
-│   ├── cooccurrence_curves.csv
-│   ├── cooccurrence_pairs.csv
-│   ├── neighborhood_counts.csv
-│   ├── neighborhood_pairs.csv
-│   ├── neighborhood_zscore.csv
-│   ├── network_per_cluster.csv
-│   ├── network_summary.csv
-│   ├── pair_summary.csv
-│   ├── per_cluster_metrics.csv
-│   ├── ripley_cluster_summary.csv
-│   ├── ripley_curves.csv
-│   ├── spot_statistics.csv
-│   └── top_results.csv
-└── figures/
-    ├── bivariate_moran_scatter.png
-    ├── bivariate_moran_spatial.png
-    ├── centrality_scores.png
-    ├── centrality_scores_barplot.png
-    ├── co_occurrence_curves.png
-    ├── co_occurrence_distribution.png
-    ├── co_occurrence_top_pairs.png
-    ├── geary_pvalue_distribution.png
-    ├── geary_ranking.png
-    ├── geary_score_vs_significance.png
-    ├── moran_pvalue_distribution.png
-    ├── moran_ranking.png
-    ├── moran_score_vs_significance.png
-    ├── neighborhood_enrichment_heatmap.png
-    ├── neighborhood_top_pairs.png
-    ├── neighborhood_zscore_distribution.png
-    ├── network_degree_histogram.png
-    ├── network_per_cluster_degree.png
-    ├── ripley_cluster_max_stat.png
-    ├── ripley_curves.png
-    └── ripley_stat_distribution.png
-```
+analyze returns the same AnnData. run_info restores diagnostic scalars and
+method-specific DataFrames from a JSON record. results_table returns a copy
+of one table. The CLI removes the record before writing processed.h5ad.
 
-## File contents
+All successful CLI runs write report.md, result.json, commands.sh,
+requirements.txt, r_visualization.sh and tables/analysis_summary.csv.
+figure_data/manifest.json names available gallery data and successful plots.
 
-- `tables/analysis_results.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/analysis_summary.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/bivariate_moran_summary.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/centrality_scores.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/cluster_summary.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/cooccurrence_curves.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/cooccurrence_pairs.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/neighborhood_counts.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/neighborhood_pairs.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/neighborhood_zscore.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/network_per_cluster.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/network_summary.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/pair_summary.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/per_cluster_metrics.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/ripley_cluster_summary.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/ripley_curves.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/spot_statistics.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `tables/top_results.csv` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/bivariate_moran_scatter.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/bivariate_moran_spatial.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/centrality_scores.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/centrality_scores_barplot.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/co_occurrence_curves.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/co_occurrence_distribution.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/co_occurrence_top_pairs.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/geary_pvalue_distribution.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/geary_ranking.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/geary_score_vs_significance.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/moran_pvalue_distribution.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/moran_ranking.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/moran_score_vs_significance.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/neighborhood_enrichment_heatmap.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/neighborhood_top_pairs.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/neighborhood_zscore_distribution.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/network_degree_histogram.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/network_per_cluster_degree.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/ripley_cluster_max_stat.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/ripley_curves.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `figures/ripley_stat_distribution.png` — written by `spatial_statistics.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_statistics.py`.
-- `manifest.json` — written by `spatial_statistics.py`.
-- `processed.h5ad` — written by `spatial_statistics.py`.
-- `r_visualization.sh` — written by `spatial_statistics.py`.
-- `requirements.txt` — written by `spatial_statistics.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Analysis tables
 
-## Notes
+- Neighborhood enrichment: tables/neighborhood_zscore.csv, tables/neighborhood_counts.csv and tables/neighborhood_pairs.csv.
+- Ripley: tables/ripley_curves.csv and tables/ripley_cluster_summary.csv.
+- Co-occurrence: tables/cooccurrence_curves.csv and tables/cooccurrence_pairs.csv.
+- Moran/Geary: tables/moran_results.csv or tables/geary_results.csv.
+- Local Moran/Getis-Ord: tables/local_moran_summary.csv and tables/local_moran_spots.csv, or tables/getis_ord_summary.csv and tables/getis_ord_spots.csv.
+- Bivariate Moran: tables/bivariate_moran_summary.csv.
+- Network topology: tables/network_summary.csv and, when labels exist, tables/network_per_cluster.csv.
+- Spatial centrality: tables/centrality_scores.csv (cluster-level).
 
-Auto-generated from `spatial_statistics.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+Empty method tables are omitted. Gallery exports are separate:
+figure_data/analysis_summary.csv, and nonempty available tables named
+analysis_results.csv, top_results.csv, pair_summary.csv, cluster_summary.csv,
+per_cluster_metrics.csv and spot_statistics.csv under figure_data/.
+
+## Figures
+
+Only the selected method's plots are attempted. Each file also requires
+its data to exist and rendering to succeed:
+
+- Enrichment: figures/neighborhood_enrichment_heatmap.png, figures/neighborhood_top_pairs.png, figures/neighborhood_zscore_distribution.png.
+- Ripley: figures/ripley_curves.png, figures/ripley_cluster_max_stat.png, figures/ripley_stat_distribution.png.
+- Co-occurrence: figures/co_occurrence_curves.png, figures/co_occurrence_top_pairs.png, figures/co_occurrence_distribution.png.
+- Moran: figures/moran_ranking.png, figures/moran_score_vs_significance.png, figures/moran_pvalue_distribution.png.
+- Geary: figures/geary_ranking.png, figures/geary_score_vs_significance.png, figures/geary_pvalue_distribution.png.
+- Local Moran: figures/local_moran_spatial.png, figures/local_moran_summary_barplot.png, figures/local_moran_pvalue_distribution.png.
+- Getis-Ord: figures/getis_ord_spatial.png, figures/getis_ord_summary_barplot.png, figures/getis_ord_pvalue_distribution.png.
+- Bivariate Moran: figures/bivariate_moran_scatter.png and figures/bivariate_moran_spatial.png.
+- Network topology: figures/network_degree_histogram.png and figures/network_per_cluster_degree.png.
+- Centrality: figures/centrality_scores.png and figures/centrality_scores_barplot.png.
+
+Local analyses add per-gene spot statistic columns. Spatial graphs are retained
+in obsp, and Squidpy method outputs remain in their native uns slots.

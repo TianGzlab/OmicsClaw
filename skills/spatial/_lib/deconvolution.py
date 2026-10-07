@@ -12,16 +12,13 @@ from __future__ import annotations
 
 import gc
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy import sparse
-
-from skills._sdk.runtime_env import ensure_runtime_cache_dirs
-
-ensure_runtime_cache_dirs("omicsclaw")
 
 import scanpy as sc
 
@@ -187,9 +184,9 @@ def _restore_counts(adata, method_name: str = "Unknown") -> "sc.AnnData":
     return adata.copy()
 
 
-def _load_reference(reference_path: str, cell_type_key: str) -> "sc.AnnData":
+def _load_reference(reference_path, cell_type_key: str) -> "sc.AnnData":
     logger.info("Loading reference: %s", reference_path)
-    adata_ref = sc.read_h5ad(reference_path)
+    adata_ref = reference_path.copy() if isinstance(reference_path, sc.AnnData) else sc.read_h5ad(reference_path)
     if cell_type_key not in adata_ref.obs.columns:
         cat_cols = [
             c for c in adata_ref.obs.columns
@@ -203,7 +200,7 @@ def _load_reference(reference_path: str, cell_type_key: str) -> "sc.AnnData":
 
 
 def _common_genes(adata_sp, adata_ref) -> list[str]:
-    common = list(set(adata_sp.var_names) & set(adata_ref.var_names))
+    common = sorted(set(adata_sp.var_names) & set(adata_ref.var_names))
     if len(common) < 50:
         raise ValueError(
             f"Only {len(common)} genes shared between spatial and reference data. "
@@ -287,6 +284,7 @@ def deconvolve_flashdeconv(
     lambda_spatial: float | str = METHOD_PARAM_DEFAULTS["flashdeconv"]["lambda_spatial"],
     n_hvg: int = METHOD_PARAM_DEFAULTS["flashdeconv"]["n_hvg"],
     n_markers_per_type: int = METHOD_PARAM_DEFAULTS["flashdeconv"]["n_markers_per_type"],
+    random_state: int = 0,
 ) -> tuple[pd.DataFrame, dict]:
     require("flashdeconv", feature="FlashDeconv deconvolution")
     import flashdeconv as fd
@@ -305,6 +303,7 @@ def deconvolve_flashdeconv(
         adata_sp, adata_ref_sub, cell_type_key=cell_type_key,
         sketch_dim=sketch_dim, lambda_spatial=lambda_spatial,
         n_hvg=n_hvg, n_markers_per_type=n_markers_per_type,
+        random_state=random_state,
     )
 
     if "flashdeconv" not in adata_sp.obsm:
@@ -774,6 +773,7 @@ def deconvolve_tangram(
     learning_rate: float = METHOD_PARAM_DEFAULTS["tangram"]["learning_rate"],
     mode: str = METHOD_PARAM_DEFAULTS["tangram"]["mode"],
     use_gpu: bool = True,
+    random_state: int = 0,
 ) -> tuple[pd.DataFrame, dict]:
     require("tangram", feature="Tangram deconvolution")
     import tangram as tg
@@ -800,8 +800,12 @@ def deconvolve_tangram(
         logger.info("Computing %d highly variable genes for Tangram training...", n_hvg)
         sc.pp.highly_variable_genes(adata_ref, n_top_genes=n_hvg)
     genes = list(adata_ref.var_names[adata_ref.var["highly_variable"]])
+    fallback = {}
     if len(genes) == 0:
         logger.warning("No HVGs found. Falling back to all %d common genes.", len(common))
+        warnings.warn("No reference HVGs; Tangram uses all shared genes", RuntimeWarning, stacklevel=2)
+        fallback = {"requested_method": "tangram_hvg", "executed_method": "tangram_all_shared_genes",
+                    "fallback_reason": "Reference highly_variable mask selects no genes"}
         genes = common
 
     spatial_key = get_spatial_key(adata)
@@ -828,6 +832,7 @@ def deconvolve_tangram(
         "num_epochs": n_epochs,
         "learning_rate": learning_rate,
         "device": device,
+        "random_state": random_state,
     }
     if mode == "clusters":
         map_kwargs["cluster_label"] = cell_type_key
@@ -859,6 +864,7 @@ def deconvolve_tangram(
         learning_rate=learning_rate,
         mode=mode,
         effective_params=effective_params,
+        **fallback,
     )
 
 

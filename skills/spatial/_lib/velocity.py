@@ -144,6 +144,7 @@ def preprocess_for_velocity(
     n_pcs: int = COMMON_PREPROCESS_DEFAULTS["velocity_n_pcs"],
     n_neighbors: int = COMMON_PREPROCESS_DEFAULTS["velocity_n_neighbors"],
     use_highly_variable: bool = COMMON_PREPROCESS_DEFAULTS["velocity_use_highly_variable"],
+    random_state: int = 0,
 ) -> dict:
     """Prepare moments and neighbor graph for velocity inference."""
     import scanpy as sc
@@ -179,11 +180,11 @@ def preprocess_for_velocity(
         except Exception as exc:
             logger.warning("Could not compute highly_variable genes: %s", exc)
 
-    pca_kwargs = {"n_comps": eff_n_pcs}
+    pca_kwargs = {"n_comps": eff_n_pcs, "random_state": random_state}
     if "highly_variable" in adata.var.columns:
         pca_kwargs["use_highly_variable"] = bool(use_highly_variable)
     sc.pp.pca(adata, **pca_kwargs)
-    sc.pp.neighbors(adata, n_neighbors=eff_n_neighbors, n_pcs=eff_n_pcs)
+    sc.pp.neighbors(adata, n_neighbors=eff_n_neighbors, n_pcs=eff_n_pcs, random_state=random_state)
     scv.pp.moments(
         adata,
         n_pcs=eff_n_pcs,
@@ -352,6 +353,7 @@ def run_scvelo(
     dynamical_fit_scaling: bool = DYNAMICAL_DEFAULTS["dynamical_fit_scaling"],
     dynamical_fit_steady_states: bool = DYNAMICAL_DEFAULTS["dynamical_fit_steady_states"],
     dynamical_n_jobs: int | None = DYNAMICAL_DEFAULTS["dynamical_n_jobs"],
+    random_state: int = 0,
 ) -> dict:
     """Run the scVelo backend and return a standardized summary."""
     scv = require("scvelo", feature="RNA velocity")
@@ -364,6 +366,7 @@ def run_scvelo(
         n_pcs=velocity_n_pcs,
         n_neighbors=velocity_n_neighbors,
         use_highly_variable=velocity_use_highly_variable,
+        random_state=random_state,
     )
 
     if mode == "dynamical":
@@ -415,6 +418,8 @@ def run_scvelo(
         warnings_list.append(msg)
 
     try:
+        if "root_cells" not in adata.obs:
+            scv.tl.terminal_states(adata, vkey="velocity", random_state=random_state)
         scv.tl.velocity_pseudotime(adata, vkey="velocity")
     except Exception as exc:
         msg = f"velocity_pseudotime failed: {exc}"
@@ -487,6 +492,7 @@ def run_velovi(
     velovi_batch_size: int = VELOVI_DEFAULTS["velovi_batch_size"],
     velovi_n_samples: int = VELOVI_DEFAULTS["velovi_n_samples"],
     velovi_early_stopping: bool = VELOVI_DEFAULTS["velovi_early_stopping"],
+    random_state: int = 0,
 ) -> dict:
     """Run the VELOVI backend and return a standardized summary."""
     require("scvelo", feature="VELOVI preprocessing")
@@ -495,6 +501,9 @@ def run_velovi(
     import scvelo as scv
     import torch
     from scvi.external import VELOVI
+    import scvi
+
+    scvi.settings.seed = random_state
 
     warnings_list: list[str] = []
     preprocess_params = preprocess_for_velocity(
@@ -504,6 +513,7 @@ def run_velovi(
         n_pcs=velocity_n_pcs,
         n_neighbors=velocity_n_neighbors,
         use_highly_variable=velocity_use_highly_variable,
+        random_state=random_state,
     )
 
     try:
@@ -589,6 +599,8 @@ def run_velovi(
         warnings_list.append(msg)
 
     try:
+        if "root_cells" not in adata.obs:
+            scv.tl.terminal_states(adata, vkey="velocity", random_state=random_state)
         scv.tl.velocity_pseudotime(adata, vkey="velocity")
     except Exception as exc:
         msg = f"velocity_pseudotime failed: {exc}"
@@ -659,6 +671,7 @@ def run_velocity(
     velovi_batch_size: int = VELOVI_DEFAULTS["velovi_batch_size"],
     velovi_n_samples: int = VELOVI_DEFAULTS["velovi_n_samples"],
     velovi_early_stopping: bool = VELOVI_DEFAULTS["velovi_early_stopping"],
+    random_state: int = 0,
 ) -> dict:
     """Run the requested RNA velocity method and return a unified summary."""
     if method not in SUPPORTED_METHODS:
@@ -695,6 +708,7 @@ def run_velocity(
             velovi_batch_size=velovi_batch_size,
             velovi_n_samples=velovi_n_samples,
             velovi_early_stopping=velovi_early_stopping,
+            random_state=random_state,
         )
     else:
         result = run_scvelo(
@@ -719,6 +733,7 @@ def run_velocity(
             dynamical_fit_scaling=dynamical_fit_scaling,
             dynamical_fit_steady_states=dynamical_fit_steady_states,
             dynamical_n_jobs=dynamical_n_jobs,
+            random_state=random_state,
         )
 
     return {"n_cells": int(adata.n_obs), "n_genes": int(adata.n_vars), **result}

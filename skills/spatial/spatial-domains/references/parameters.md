@@ -3,6 +3,10 @@
 
 # Parameters
 
+## Python library
+
+Call identify(adata, method=..., random_state=0, **parameters). Keyword names match CLI flags with hyphens replaced by underscores. method, resolution, spatial_weight and refine are explicit arguments. n_domains defaults to seven for fixed-K methods. The CLI keeps the historical seed 42 for STAGATE, GraphST and CellCharter; pass random_state=42 to match it. SpaGCN, STAGATE and BANKSY do not expose every training RNG, so results vary between runs.
+
 ## Allowed extra CLI flags
 
 - `--auto-k`

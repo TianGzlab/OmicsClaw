@@ -107,7 +107,46 @@ def _spatial_input(path: Path) -> None:
     generate_demo_visium().write_h5ad(path)
 
 
+def _spatial_multisample_input(path: Path) -> None:
+    import numpy as np
+    from scripts.generate_demo_data import generate_demo_visium
+    from skills._sdk.notebook import load_skill
+
+    data = load_skill('spatial-preprocess').preprocess(generate_demo_visium(), n_top_hvg=50, n_pcs=15)
+    data.obs['batch'] = [f'batch_{i % 3}' for i in range(data.n_obs)]
+    data.obs['sample'] = [f'sample_{i % 6}' for i in range(data.n_obs)]
+    data.obs['condition'] = np.where(np.arange(data.n_obs) % 6 < 3, 'control', 'treated')
+    data.write_h5ad(path)
+
+
 REGISTRY = {
+    "spatial-register": Skill("skills/spatial/spatial-register/spatial_register.py", "api_spatial_register", {
+        "default": Case(("--slice-key", "batch"), input=_spatial_multisample_input,
+                        environment={key: "1" for key in _THREAD_VARIABLES}, exclude={
+                            key: "Fix reference-by-source transport orientation and reject solver failure; old baseline silently returned unaligned coordinates. Unequal-size barycenter regression is in test_api.py."
+                            for key in (
+                                "summary.json:disparities", "summary.json:mean_disparity",
+                                "figures/registration_disparities.png",
+                                "tables/registration_metrics.csv:mean_shift",
+                                "tables/registration_metrics.csv:median_shift",
+                                "tables/registration_metrics.csv:max_shift",
+                                "tables/registration_metrics.csv:disparity",
+                                "tables/registration_summary.csv:value",
+                                "obs_numeric.csv:registration_shift_distance",
+                            )}),
+    }),
+    "spatial-condition": Skill("skills/spatial/spatial-condition/spatial_condition.py", "api_spatial_condition", {
+        name: Case(args, input=_spatial_multisample_input,
+                   environment={key: "1" for key in _THREAD_VARIABLES})
+        for name, args in {"default": ("--pydeseq2-n-cpus", "1", "--sample-key", "sample"),
+                           "wilcoxon": ("--method", "wilcoxon", "--sample-key", "sample")}.items()
+    }),
+    'spatial-integrate': Skill('skills/spatial/spatial-integrate/spatial_integrate.py', 'api_spatial_integrate', {
+        name: Case(args, input=_spatial_multisample_input, environment={key: '1' for key in _THREAD_VARIABLES})
+        for name, args in {
+            'default': (), 'bbknn': ('--method', 'bbknn'), 'scanorama': ('--method', 'scanorama'),
+        }.items()
+    }),
     'spatial-preprocess': Skill('skills/spatial/spatial-preprocess/spatial_preprocess.py', 'api_spatial_preprocess', {
         'default': Case((), input=_spatial_input, environment={key: '1' for key in _THREAD_VARIABLES}),
         'resolution_sweep': Case(('--n-top-hvg', '50', '--n-pcs', '15', '--n-neighbors', '10',
@@ -222,6 +261,18 @@ REGISTRY = {
     }),
 }
 """One entry per skill; the first five keep their original pilot cases."""
+
+def _load_spatial_cases() -> None:
+    from importlib import import_module
+
+    for batch in ("s2", "s3", "s5", "deconv", "communication"):
+        module_name = f"tests.parity.spatial_{batch}"
+        if (Path(__file__).parent / f"spatial_{batch}.py").exists():
+            module = import_module(module_name)
+            REGISTRY.update(module.register(Case, Skill))
+
+
+_load_spatial_cases()
 
 _DROPPED_SUMMARY_KEYS = {"completed_at", "elapsed_seconds", "runtime_seconds", "output_dir", "output_h5ad",
                          "input_file", "standardized_at"}
@@ -526,8 +577,13 @@ def compare(golden: Path, snapshot: Path, *, exclude: dict[str, str] | None = No
         if expected != actual:
             problems.append(f"{folder}: files differ: missing {sorted(expected - actual)}, extra {sorted(actual - expected)}")
         for relative in sorted(expected & actual):
-            left = pd.read_csv(golden / folder / relative)
-            right = pd.read_csv(snapshot / folder / relative)
+            frames = []
+            for path in (golden / folder / relative, snapshot / folder / relative):
+                try:
+                    frames.append(pd.read_csv(path))
+                except pd.errors.EmptyDataError:
+                    frames.append(pd.DataFrame())
+            left, right = frames
             columns = [key.split(":", 1)[1] for key in exclude if key.startswith(f"{folder}/{relative}:")]
             left, right = (frame.drop(columns=columns, errors="ignore") for frame in (left, right))
             if folder == "obs_labels":
@@ -559,8 +615,13 @@ def compare_output(skill: str, case: str, output: Path) -> list[str]:
 def comparison_options(skill: str, case: str) -> dict:
     meta_path = golden_dir(skill, case) / "meta.json"
     meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
-    return {"exclude": REGISTRY[skill].cases[case].exclude,
-            "structure_only": meta.get("deterministic") is False}
+    exclude = REGISTRY[skill].cases[case].exclude
+    differences = meta.get("repeat_differences", [])
+    prefixes = tuple(key.replace(":", ".", 1) + ": " for key in exclude if ":" in key)
+    only_excluded_columns_vary = bool(differences) and all(
+        difference.startswith(prefixes) for difference in differences)
+    return {"exclude": exclude,
+            "structure_only": meta.get("deterministic") is False and not only_excluded_columns_vary}
 
 
 def _git_commit() -> str | None:

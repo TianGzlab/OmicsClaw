@@ -279,7 +279,8 @@ def _weights_from_connectivities(adata):
     conn = adata.obsp["spatial_connectivities"]
     if not sparse.issparse(conn):
         conn = sparse.csr_matrix(conn)
-    w = WSP(conn.tocsr()).to_W(silence_warnings=True)
+    # PySAL's JIT permutation kernels require weights and expression to share dtype.
+    w = WSP(conn.tocsr().astype(np.float64)).to_W(silence_warnings=True)
     w.transform = "r"
     return w
 

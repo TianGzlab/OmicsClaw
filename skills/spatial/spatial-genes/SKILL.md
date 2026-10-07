@@ -1,8 +1,6 @@
 ---
 name: spatial-genes
-description: Load when ranking spatially variable genes (SVGs) on a preprocessed spatial AnnData via Moran's
-  I, SpatialDE, SPARK-X, or FlashS. Skip when detecting tissue domains (use spatial-domains); differential
-  expression between groups (use spatial-de).
+description: Load when ranking spatially variable genes with Moran's I, SpatialDE, SPARK-X, or FlashS. Skip when detecting tissue domains (use spatial-domains) or differential expression between groups (use spatial-de).
 trigger: spatially variable gene, spatial gene, SVG, SpatialDE, SPARK-X, spatial pattern, Moran, spatial autocorrelation
 tags:
 - spatial
@@ -18,109 +16,111 @@ tags:
 
 ## When to use
 
-The user has a preprocessed spatial AnnData (`obsm["spatial"]`
-populated; ideally `layers["counts"]` for count-based methods) and
-wants per-gene spatial-variability scores. Four methods:
+Rank genes whose expression varies across spatial coordinates. Moran's I
+uses continuous log-normalized expression; SpatialDE, SPARK-X and the legacy
+FlashS approximation use counts. Scores have method-specific meanings.
 
-- `morans` (default) — Moran's I via `squidpy.gr.spatial_autocorr`
-  (`--morans-n-neighs`, `--morans-n-perms`). Fast.
-- `spatialde` — SpatialDE Gaussian-process model (`--spatialde-min-counts`,
-  `--spatialde-aeh-patterns` / `--spatialde-aeh-lengthscale`,
-  `--spatialde-no-aeh`). Most rigorous, slower.
-- `sparkx` — SPARK-X non-parametric covariance (`--sparkx-num-cores`,
-  `--sparkx-max-genes`). Scales to large slides.
-- `flashs` — FLASH-S random-Fourier-feature approximation
-  (`--flashs-n-rand-features`, `--flashs-bandwidth`). Fastest.
+## Use from a step
 
-For tissue domain detection use `spatial-domains`; for between-group
-DE use `spatial-de`.
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("spatial-genes")
+adata = read_input("processed.h5ad")
+library.spatial_genes(adata, random_state=0)
+write_output(library.results(adata), "tables/svg_results.csv")
+```
 
-## Inputs & Outputs
+The executable example checks spatial autocorrelation in simulated stripes.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `spatial_genes(adata, *, method='morans', n_top_genes=20, fdr_threshold=0.05, random_state=None, **parameters)`
 
-- `tables/coords.csv`
-- `tables/counts.csv`
-- `tables/significant_svgs.csv`
-- `tables/sparkx_results.csv`
-- `tables/svg_observation_metrics.csv`
-- `tables/svg_results.csv`
-- `tables/svg_run_summary.csv`
-- `tables/top_svg_scores.csv`
-- `tables/top_svg_spatial_points.csv`
-- `tables/top_svg_umap_points.csv`
-- `figures/moran_ranking.png`
-- `figures/svg_score_vs_significance.png`
-- `figures/svg_significance_distribution.png`
-- `figures/top_svg_scores.png`
-- `figures/top_svg_spatial.png`
-- `figures/top_svg_umap.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `uns`: `moranI`
+Compute spatial gene scores and return the same AnnData.
 
-## Flow
+Moran's I reads X; count-based methods prefer counts, then raw, then X.
+SpatialDE AEH does not expose a seed: results vary between runs.
 
-1. Load AnnData (`--input`) or chain through `spatial-preprocess --demo` via subprocess (`spatial_genes.py`).
-2. `parser.error` validates per-method numeric ranges (`--morans-n-neighs` ≥ 1, etc.).
-3. Validate input matrix: count-based methods (`spatialde` / `sparkx`) expect `layers["counts"]`; if missing the script logs a warning and falls back to `adata.X` — results may be suboptimal.
-4. Dispatch to chosen method; method-specific kwargs flow from `_collect_run_configuration(args)`.
-5. Build standardised SVG result table with score / pvalue / padj columns; rank by score.
-6. Detect significance at `--fdr-threshold`; build top-N table.
-7. Save tables, figures, `processed.h5ad`, `report.md`, `result.json`.
+:param adata: Expression and spatial coordinates; modified in place.
+:param method: CLI default morans; spatialde, sparkx or flashs also supported.
+:param n_top_genes: CLI default 20 reported significant genes.
+:param fdr_threshold: CLI default 0.05 significance threshold.
+:param random_state: None uses CLI seeds, 0 for Moran's I and 42 for FlashS.
+:param parameters: Method-specific CLI parameters in references/parameters.md.
+:returns: The same AnnData with spatial_genes_results in uns.
+:raises ValueError: Method, thresholds or spatial coordinates are invalid.
+:raises ImportError: A backend is missing; use install_skill_deps.
+
+### `results(adata, *, significant_only=False)`
+
+Return native spatial-gene scores and significance columns.
+
+:param adata: AnnData returned by spatial_genes.
+:param significant_only: Default False; True selects the run's FDR threshold.
+:returns: A new DataFrame; score meaning depends on the method.
+:raises ValueError: No run is recorded.
+
+### `run_info(adata, *, keep=True)`
+
+Read the most recent spatial-gene diagnostics.
+
+:param adata: AnnData returned by spatial_genes.
+:param keep: Default True; False removes transient diagnostics for CLI output.
+:returns: Method, thresholds and significant-gene counts.
+:raises ValueError: No run is recorded.
+
+### `ranking_figure(adata, *, n_top=20)`
+
+Plot the highest-scoring genes without writing files.
+
+:param adata: AnnData returned by spatial_genes.
+:param n_top: Default 20 genes, matching the CLI report size.
+:returns: A matplotlib Figure.
+:raises ValueError: No run is recorded or n_top is not positive.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Moran's I defaults to six neighbors and 100 permutations. The default seed is
+0 for Moran's I and 42 for FlashS, matching their CLIs. SpatialDE's optional
+AEH clustering has no seed interface and may vary between runs. SPARK-X
+requires R and SPARK. See [parameters](references/parameters.md) for backend
+keywords and [methodology](references/methodology.md) for algorithms.
 
 ## Gotchas
 
-- **`--input` missing → bare `print` + `sys.exit(1)`, NOT `parser.error`.** `spatial_genes.py` does `print("ERROR: Provide --input or --demo", file=sys.stderr); sys.exit(1)`. Different from sibling skills' `parser.error` (exit 2).
-- **`spatialde` / `sparkx` silently fall back to `.X` when `layers["counts"]` is missing.** `spatial_genes.py` logs a warning and continues — `result.json` does NOT record the fallback as a separate flag. Always add `adata.layers["counts"] = adata.X.copy()` upstream when running these count-based methods on preprocessed data.
-- **Demo mode chains through `spatial-preprocess --demo` via subprocess.** `spatial_genes.py` raises `RuntimeError(f"spatial-preprocess --demo failed: {result.stderr}")` if the chained run fails. Real runs skip this chain.
-- **Per-method numeric flag validation goes through `parser.error` (exit 2).** `spatial_genes.py` covers Moran's-I, SpatialDE, SPARK-X, FlashS numeric ranges. Out-of-range values exit 2 before the method dispatches.
-- **No method writes a `var` column — scores live in `adata.uns` (morans only) and `tables/svg_results.csv`.** `spatial_genes.py` checks `summary["method"] == "morans" and "moranI" in adata.uns`; `_lib/genes.py` consumes from `adata.uns["moranI"]` only. There is no `var["moranI"]` mirror. SpatialDE / SPARK-X / FlashS write to `tables/svg_results.csv` exclusively.
-- **Result-table column varies by method.** `tables/svg_results.csv` always has `gene` + `score` + `pvalue` + `padj`, but the `score` column's *semantic* differs: Moran's I (in [-1, 1], higher = more spatial), SpatialDE LL difference, SPARK-X test stat, FLASH-S coefficient. Compare scores within method only.
+- `spatial_genes` stores every method's table in `uns['spatial_genes_results']`;
+  Moran's I also writes `uns['moranI']`.
+- `results` returns native scores, not a common calibrated statistic.
+- Count methods prefer `layers['counts']`, then raw, then X with a warning;
+  preserve original counts before normalization.
+- `run_info()['significance_column']` names the method's p-value/q-value column.
+- `spatial_genes(method='spatialde')` needs both SpatialDE and NaiveDE.
 
-## Key CLI
+## Inputs and outputs
+
+Functions modify AnnData in place and return tables/Figures without file
+output. The CLI writes `processed.h5ad`, `tables/svg_results.csv`, diagnostics,
+report and result JSON. The [output contract](references/output_contract.md)
+distinguishes temporary R exchange files from delivered artifacts.
+
+## CLI
 
 ```bash
-# Demo (chained from spatial-preprocess --demo)
-python skills/spatial/spatial-genes/spatial_genes.py --demo --output /tmp/spatial_genes_demo
-
-# Default Moran's I
-python skills/spatial/spatial-genes/spatial_genes.py \
-  --input preprocessed.h5ad --output results/ \
-  --method morans --morans-n-neighs 6 --morans-n-perms 100
-
-# SpatialDE on raw counts
-python skills/spatial/spatial-genes/spatial_genes.py \
-  --input preprocessed.h5ad --output results/ \
-  --method spatialde --spatialde-min-counts 3 --spatialde-aeh-patterns 5
-
-# SPARK-X for large slides
-python skills/spatial/spatial-genes/spatial_genes.py \
-  --input preprocessed.h5ad --output results/ \
-  --method sparkx --sparkx-num-cores 8 --sparkx-max-genes 5000
-
-# FLASH-S fast approximation
-python skills/spatial/spatial-genes/spatial_genes.py \
-  --input preprocessed.h5ad --output results/ \
-  --method flashs --flashs-n-rand-features 200 --flashs-bandwidth 1.0
+python skills/spatial/spatial-genes/spatial_genes.py --input processed.h5ad --output results/genes
+python skills/spatial/spatial-genes/spatial_genes.py --demo --output /tmp/spatial-genes_demo
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — Moran's I vs SpatialDE vs SPARK-X vs FlashS speed/rigor trade-offs
-- `references/output_contract.md` — `tables/svg_results.csv` column schema; per-method semantics
-- Adjacent skills: `spatial-preprocess` (upstream — produces `obsm["spatial"]` and `layers["counts"]`), `spatial-domains` (parallel — domain detection, NOT per-gene scoring), `spatial-statistics` (parallel — autocorrelation / co-occurrence stats over labels, NOT genes), `spatial-de` (downstream — DE between domain pairs after picking interesting domains)
+Use spatial-preprocess to prepare expression, spatial-de to compare groups,
+and spatial-statistics for spatial relationships between labels.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
 `anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`, `SpatialDE`, `squidpy`, `statsmodels`
+
+SpatialDE also imports NaiveDE. SPARK-X requires the R package SPARK.

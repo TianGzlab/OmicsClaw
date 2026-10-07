@@ -1,72 +1,36 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── requirements.txt
-├── tables/
-│   ├── de_full.csv
-│   ├── de_plot_points.csv
-│   ├── de_run_summary.csv
-│   ├── de_significant.csv
-│   ├── de_spatial_points.csv
-│   ├── de_umap_points.csv
-│   ├── group_de_metrics.csv
-│   ├── markers_top.csv
-│   ├── sample_counts_by_group.csv
-│   ├── skipped_sample_groups.csv
-│   └── top_de_hits.csv
-└── figures/
-    ├── de_effect_burden_spatial.png
-    ├── de_effect_burden_umap.png
-    ├── de_group_spatial_context.png
-    ├── de_marker_dotplot.png
-    ├── de_marker_heatmap.png
-    ├── de_pvalue_distribution.png
-    ├── de_top_hits_barplot.png
-    ├── de_volcano.png
-    ├── group_de_burden.png
-    ├── sample_counts_by_group.png
-    └── skipped_sample_groups.png
-```
+Functions return the same AnnData, result DataFrames and a Figure without
+writing files. `run_info` holds a JSON diagnostic record; the CLI removes it
+before writing `processed.h5ad`. Existing Scanpy ranking keys remain.
 
-## File contents
+The CLI writes `report.md`, `result.json`, `processed.h5ad`, `reproducibility/commands.sh`,
+`reproducibility/requirements.txt` and `reproducibility/r_visualization.sh`.
 
-- `tables/de_full.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/de_plot_points.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/de_run_summary.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/de_significant.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/de_spatial_points.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/de_umap_points.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/group_de_metrics.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/markers_top.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/sample_counts_by_group.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/skipped_sample_groups.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `tables/top_de_hits.csv` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_effect_burden_spatial.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_effect_burden_umap.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_group_spatial_context.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_marker_dotplot.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_marker_heatmap.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_pvalue_distribution.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_top_hits_barplot.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/de_volcano.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/group_de_burden.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/sample_counts_by_group.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `figures/skipped_sample_groups.png` — written by `spatial_de.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_de.py`.
-- `manifest.json` — written by `spatial_de.py`.
-- `processed.h5ad` — written by `spatial_de.py`.
-- `r_visualization.sh` — written by `spatial_de.py`.
-- `requirements.txt` — written by `spatial_de.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Tables
 
-## Notes
+- `tables/de_full.csv`: every tested gene, with native Scanpy or PyDESeq2 columns.
+- `tables/markers_top.csv` and `tables/top_de_hits.csv`: ranked display selections.
+- `tables/de_significant.csv`: adjusted significance and absolute effect thresholds.
+- `tables/group_de_metrics.csv`: group-level hit counts.
+- `tables/sample_counts_by_group.csv`: pseudobulk support; empty for Scanpy.
+- `tables/skipped_sample_groups.csv`: excluded sample-group bins; may be empty.
+- `tables/de_plot_points.csv` and `tables/de_run_summary.csv`: gallery data.
+- `tables/de_spatial_points.csv` and `tables/de_umap_points.csv`: only when
+  their respective coordinates exist.
 
-Auto-generated from `spatial_de.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+## Conditional figures
+
+- `figures/de_group_spatial_context.png`: group labels and spatial coordinates.
+- `figures/de_marker_dotplot.png` and `figures/de_marker_heatmap.png`: selected
+  marker genes and labels.
+- `figures/de_volcano.png` and `figures/de_pvalue_distribution.png`: nonempty DE table.
+- `figures/de_effect_burden_spatial.png` and `figures/de_effect_burden_umap.png`:
+  group effect metrics and their respective coordinates.
+- `figures/de_top_hits_barplot.png`: nonempty top-hit table.
+- `figures/group_de_burden.png`: group metrics.
+- `figures/sample_counts_by_group.png`: pseudobulk sample counts.
+- `figures/skipped_sample_groups.png`: at least one excluded bin.
+
+The gallery also writes `figure_data/manifest.json` and data for rendered plots.
+Figure failures are logged; the inventory does not guarantee every PNG.

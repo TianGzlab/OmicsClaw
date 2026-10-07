@@ -22,115 +22,99 @@ tags:
 
 ## When to use
 
-The user has a preprocessed spatial AnnData (`obsm["X_pca"]` and
-`obsm["spatial"]` populated) and wants tissue regions / niches
-identified per spot (`obs["spatial_domain"]`). Seven methods:
+Find tissue domains from expression and coordinates. Use spatial-annotate for named cell labels and spatial-genes for variable genes.
 
-- `leiden` (default) — spatial-weighted Leiden (`--resolution`,
-  `--spatial-weight`). No GPU.
-- `louvain` — spatial-weighted Louvain. No GPU.
-- `spagcn` — graph convolutional, fixed-K (`--n-domains`, `--epochs`,
-  `--spagcn-p`). Requires `torch` + `SpaGCN`.
-- `stagate` — graph attention with cell-type-aware regularisation
-  (`--stagate-alpha`, `--pre-resolution`, `--rad-cutoff` / `--k-nn`).
-  Requires `torch` + `torch-geometric`.
-- `graphst` — graph-self-supervised (`--epochs`, `--dim-output`,
-  `--n-domains`). Auto-detects 10x platform. Requires `torch` +
-  `GraphST`.
-- `banksy` — neighbourhood expression matrix + PCA (`--lambda-param`,
-  `--num-neighbours`). 0.2 = cell-typing mode, 0.8 = domain mode.
-- `cellcharter` — niche-graph clustering with auto-k (`--auto-k`,
-  `--auto-k-min`/`--auto-k-max`, `--n-layers`). Requires
-  `cellcharter` + `pyro-ppl`.
+## Use from a step
 
-For spatially variable genes use `spatial-genes`; for spot-level
-cell-type labels use `spatial-annotate`.
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("spatial-domains")
+data = read_input("input.h5ad")
+data = library.identify(data, method="leiden", spatial_weight=0.3)
+write_output(library.domain_counts(data), "tables/results.csv")
+```
 
-## Inputs & Outputs
+Run [examples/example_step.py](examples/example_step.py) through the step runner.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Expects `obsm`: `spatial`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `identify(adata, *, method: str='leiden', resolution: float=1.0, spatial_weight: float=0.3, refine: bool=False, random_state: int=0, **parameters)`
 
-- `tables/domain_assignments.csv`
-- `tables/domain_counts.csv`
-- `tables/domain_method_embedding_points.csv`
-- `tables/domain_neighbor_mixing.csv`
-- `tables/domain_spatial_points.csv`
-- `tables/domain_summary.csv`
-- `tables/domain_umap_points.csv`
-- `figures/domain_local_purity_histogram.png`
-- `figures/domain_local_purity_spatial.png`
-- `figures/domain_neighbor_mixing.png`
-- `figures/domain_sizes.png`
-- `figures/pca_domains.png`
-- `figures/spatial_domains.png`
-- `figures/umap_domains.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `spatial_domain`; `obsm`: `X_stagate`, `X_graphst`, `X_banksy_pca`, `X_cellcharter`
+Identify domains in place and return the same AnnData.
 
-## Flow
+Reads log-normalized X, X_pca and spatial coordinates; graph methods reuse
+existing expression neighbors. SpaGCN, STAGATE and BANKSY results vary
+between runs because their training wrappers do not expose every RNG.
 
-1. Load AnnData (`--input`) or build a demo. Auto-compute `obsm["X_pca"]` if missing (logs a warning).
-2. Default `--n-domains` to 7 for GNN methods (`spagcn`/`stagate`/`graphst`) and for `cellcharter` when `--auto-k` is off.
-3. For `graphst`: infer `--data-type` from input metadata / path (10x Visium auto-detected).
-4. Run the chosen method; write `obs["spatial_domain"]` (categorical) and method-specific `obsm` embedding.
-5. Optionally refine domain assignments with neighbourhood smoothing (`--refine`).
-6. Compute domain counts + proportions; per-domain neighbour-mixing summary.
-7. Save tables, figures, `processed.h5ad`, `report.md`, `result.json`.
+:param adata: Preprocessed spatial AnnData; expression values are retained.
+:param method: CLI default leiden, or louvain/spagcn/stagate/graphst/banksy/cellcharter.
+:param resolution: Graph-clustering resolution, CLI default 1.0.
+:param spatial_weight: Spatial graph weight for Leiden/Louvain, CLI default 0.3.
+:param refine: False by default; True smooths labels using spatial KNN.
+:param random_state: Seed for PCA, graph clustering and supported backend seeds;
+    0 for graph methods. The neural CLI wrappers historically use 42.
+:param parameters: Backend options listed in references/parameters.md;
+    fixed-K methods use n_domains=7 unless supplied.
+:returns: The same AnnData with spatial_domain and JSON run diagnostics.
+:raises ValueError: Unsupported method or invalid graph parameters.
+:raises ImportError: A backend is missing; use install_skill_deps with the named package.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read the method, domain sizes and refinement status.
+
+:param adata: AnnData returned by identify.
+:param keep: True retains diagnostics; False removes them before CLI serialization.
+:returns: Diagnostic dict, or an empty dict before analysis.
+
+### `domain_counts(adata)`
+
+Count observations and percentages per domain.
+
+:param adata: AnnData with spatial_domain labels; X is not read.
+:returns: DataFrame with domain, n_cells and proportion (percent).
+:raises KeyError: Domain labels are absent.
+
+### `domain_figure(adata)`
+
+Plot domain labels in spatial coordinates.
+
+:param adata: AnnData with spatial_domain and spatial coordinates; X is not read.
+:returns: A matplotlib Figure without writing files.
+:raises KeyError: Domain labels are absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Leiden/Louvain combine expression and spatial graphs. SpaGCN, STAGATE, GraphST, BANKSY and CellCharter remain optional. Fixed-K methods default to seven domains.
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
 
 ## Gotchas
 
-- **`--input` missing → `sys.exit(1)` via `print` + `sys.exit`, NOT `parser.error`.** `spatial_domains.py` prints `"ERROR: Provide --input or --demo"` to stderr and `sys.exit(1)` — different from sibling skills' `parser.error`. Caller wrappers expecting `parser.error` (exit 2) get exit 1.
-- **`obsm["X_pca"]` is auto-computed when missing.** `spatial_domains.py` logs a warning and runs `sc.pp.pca`. The implicit PCA uses defaults (no HVG selection, no batch correction). For real data prefer `spatial-preprocess` upstream so the PCA reflects HVG-aware preprocessing.
-- **GNN methods auto-default `--n-domains` to 7.** `spatial_domains.py` silently sets `args.n_domains = 7` for `spagcn` / `stagate` / `graphst` and for `cellcharter` (when `--auto-k` is off). Override explicitly or these K-fixed methods quietly target 7 clusters.
-- **`obsm["spatial"]` ↔ `obsm["X_spatial"]` sync.** `spatial_domains.py` ensures both keys exist (copies one to the other if missing). Some upstream skills only write one; this skill normalises.
-- **Per-method `obsm` embedding key.** `spatial_domains.py` records: STAGATE → `obsm["X_stagate"]`, GraphST → `obsm["X_graphst"]`, BANKSY → `obsm["X_banksy_pca"]`, CellCharter → `obsm["X_cellcharter"]`. Leiden / Louvain / SpaGCN do NOT write a method-specific embedding.
-- **STAGATE is GitHub-only and never auto-installed.** `STAGATE_pyG` does not exist on PyPI, so `pip install STAGATE-pyG` always fails. `skills/_sdk/deps.py` lists it as a `git` entry, which `install_skill_deps` reports but does not install. Every other method still works; only `--method stagate` raises `ImportError`. To enable it: `pip install git+https://github.com/RucDongLab/STAGATE_pyG.git` (needs `torch` + `torch_geometric`).
-- **Performance warning at 30K cells.** `spatial_domains.py` logs a warning when `n_cells > 30000` and method ∈ {`graphst`, `spagcn`, `stagate`}. The methods still run; consider downsampling or switching to `leiden` for large datasets.
-- **GraphST is unrecommended above 5K cells.** `spatial_domains.py` logs a separate warning specifically for `graphst` when `n_cells is None or n_cells > 5000`.
+- `identify` reuses expression neighbors. SpaGCN, STAGATE and BANKSY results vary between runs. `spatial_weight=0` uses expression-only graph clustering.
+- `run_info(keep=False)` removes library diagnostics before CLI serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The library returns AnnData, DataFrames or Figures without file writes. The CLI
+keeps reports, result.json, tables and conditional gallery outputs. See the
+complete [output contract](references/output_contract.md) for filenames and conditions.
+
+## CLI
 
 ```bash
-# Demo (synthetic spatial)
-python skills/spatial/spatial-domains/spatial_domains.py --demo --output /tmp/spatial_dom_demo
-
-# Default leiden with spatial weighting
-python skills/spatial/spatial-domains/spatial_domains.py \
-  --input preprocessed.h5ad --output results/ \
-  --method leiden --resolution 1.0 --spatial-weight 0.3
-
-# SpaGCN with explicit K
-python skills/spatial/spatial-domains/spatial_domains.py \
-  --input preprocessed.h5ad --output results/ \
-  --method spagcn --n-domains 8 --spagcn-p 0.5 --epochs 200
-
-# STAGATE with cell-type-aware module
-python skills/spatial/spatial-domains/spatial_domains.py \
-  --input preprocessed.h5ad --output results/ \
-  --method stagate --rad-cutoff 150 --stagate-alpha 0.5 --n-domains 7
-
-# CellCharter with auto-k
-python skills/spatial/spatial-domains/spatial_domains.py \
-  --input preprocessed.h5ad --output results/ \
-  --method cellcharter --auto-k --auto-k-min 4 --auto-k-max 12 --n-layers 3
+python skills/spatial/spatial-domains/spatial_domains.py --input data.h5ad --output results/spatial-domains
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins; cell-count rules of thumb
-- `references/output_contract.md` — `obs["spatial_domain"]` + per-method `obsm` keys
-- Adjacent skills: `spatial-preprocess` (upstream — produces `obsm["X_pca"]` / `obsm["spatial"]`), `spatial-integrate` (upstream — for multi-batch data, run integration first), `spatial-genes` (parallel — spatially variable gene ranking, NOT domain detection), `spatial-annotate` (parallel — spot-level cell-type labels, complementary to domain labels), `spatial-de` (downstream — DE between domains)
+- [Methodology](references/methodology.md)
+- [Parameters](references/parameters.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `cellcharter`, `GraphST`, `igraph`, `louvain`, `matplotlib`, `numpy`, `pandas`, `pybanksy`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`, `SpaGCN`, `squidpy`, `STAGATE-pyG`, `torch`

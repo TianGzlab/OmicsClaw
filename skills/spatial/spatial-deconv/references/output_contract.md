@@ -1,80 +1,41 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── environment.txt
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── tables/
-│   ├── card_proportions.csv
-│   ├── card_refined_proportions.csv
-│   ├── celltype_diversity.csv
-│   ├── deconv_run_summary.csv
-│   ├── deconv_spatial_points.csv
-│   ├── deconv_spot_metrics.csv
-│   ├── deconv_umap_points.csv
-│   ├── dominant_celltype.csv
-│   ├── dominant_celltype_counts.csv
-│   ├── mean_proportions.csv
-│   ├── proportions.csv
-│   ├── rctd_proportions.csv
-│   ├── ref_celltypes.csv
-│   ├── ref_counts.csv
-│   ├── ref_meta.csv
-│   ├── spatial_coords.csv
-│   ├── spatial_counts.csv
-│   └── spotlight_proportions.csv
-└── figures/
-    ├── assignment_margin_distribution.png
-    ├── assignment_margin_spatial.png
-    ├── celltype_diversity.png
-    ├── dominant_celltype.png
-    ├── dominant_celltype_distribution.png
-    ├── mean_proportions.png
-    ├── spatial_proportions.png
-    └── umap_proportions.png
-```
+The function library returns the same spatial AnnData with a method-specific
+obsm['deconvolution_<method>'] matrix and uns cell-type labels. Reference data
+are copied. proportions returns an observation-indexed DataFrame; the figure
+function returns a matplotlib Figure without saving it. run_info(keep=False)
+removes the JSON library diagnostic record before CLI serialization.
 
-## File contents
+## CLI files
 
-- `tables/card_proportions.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/card_refined_proportions.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/celltype_diversity.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/deconv_run_summary.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/deconv_spatial_points.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/deconv_spot_metrics.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/deconv_umap_points.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/dominant_celltype.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/dominant_celltype_counts.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/mean_proportions.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/proportions.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/rctd_proportions.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/ref_celltypes.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/ref_counts.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/ref_meta.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/spatial_coords.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/spatial_counts.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `tables/spotlight_proportions.csv` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/assignment_margin_distribution.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/assignment_margin_spatial.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/celltype_diversity.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/dominant_celltype.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/dominant_celltype_distribution.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/mean_proportions.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/spatial_proportions.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `figures/umap_proportions.png` — written by `spatial_deconv.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_deconv.py`.
-- `environment.txt` — written by `spatial_deconv.py`.
-- `manifest.json` — written by `spatial_deconv.py`.
-- `processed.h5ad` — written by `spatial_deconv.py`.
-- `r_visualization.sh` — written by `spatial_deconv.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+Successful runs write processed.h5ad, report.md, result.json, commands.sh,
+requirements.txt and r_visualization.sh. Tables include:
 
-## Notes
+- tables/proportions.csv: spot identifier and cell-type proportion columns.
+- tables/dominant_celltype.csv: highest-proportion cell type per spot.
+- tables/celltype_diversity.csv: Shannon and normalized entropy.
+- tables/mean_proportions.csv: mean composition across spots.
+- tables/deconv_spot_metrics.csv: dominance, entropy and assignment margin.
+- tables/dominant_celltype_counts.csv: count of spots assigned to each type.
+- tables/card_refined_proportions.csv: only when CARD returns imputation results.
 
-Auto-generated from `spatial_deconv.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The same gallery inputs are under figure_data/, with deconv_run_summary.csv,
+conditional deconv_spatial_points.csv/deconv_umap_points.csv and manifest.json.
+R exchange CSVs live in temporary directories and are not permanent outputs.
+
+## Figures
+
+Each requires its source values and successful rendering:
+
+- figures/spatial_proportions.png: per-type spatial proportions.
+- figures/dominant_celltype.png: spatial dominant labels.
+- figures/celltype_diversity.png: spatial entropy.
+- figures/umap_proportions.png: when UMAP coordinates are available.
+- figures/assignment_margin_spatial.png: spatial assignment margin.
+- figures/mean_proportions.png: average composition.
+- figures/dominant_celltype_distribution.png: dominant-label counts.
+- figures/assignment_margin_distribution.png: assignment-margin distribution.
+
+Gallery diagnostics are added to obs by the CLI, including dominant labels,
+proportions and entropy. The function library retains the proportion matrix;
+it does not generate the report gallery as a side effect.

@@ -1,86 +1,51 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── fastccc_input.h5ad
-├── input.h5ad
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── requirements.txt
-├── tables/
-│   ├── cellchat_centrality.csv
-│   ├── cellchat_count_matrix.csv
-│   ├── cellchat_pathways.csv
-│   ├── cellchat_results.csv
-│   ├── cellchat_weight_matrix.csv
-│   ├── communication_run_summary.csv
-│   ├── communication_spatial_points.csv
-│   ├── communication_summary.csv
-│   ├── communication_umap_points.csv
-│   ├── complex_composition_table.csv
-│   ├── complex_table.csv
-│   ├── gene_table.csv
-│   ├── interaction_table.csv
-│   ├── lr_interactions.csv
-│   ├── meta.tsv
-│   ├── protein_table.csv
-│   ├── signaling_roles.csv
-│   ├── source_target_summary.csv
-│   └── top_interactions.csv
-└── figures/
-    ├── communication_pvalue_distribution.png
-    ├── communication_roles_spatial.png
-    ├── communication_score_vs_significance.png
-    ├── lr_dotplot.png
-    ├── lr_heatmap.png
-    ├── lr_spatial.png
-    ├── signaling_roles.png
-    └── source_target_summary.png
-```
+## Library
 
-## File contents
+`communicate` mutates and returns AnnData. `interactions` returns a copy of
+the canonical ligand, receptor, source, target, score and pvalue columns,
+plus any backend fields such as pathway. Missing p values remain NaN.
+`run_info` returns counts, effective parameters, lr_df, pathway_df,
+signaling_roles_df and optional extra_tables. Diagnostics are JSON encoded
+in `uns["_spatial_communication_run_info"]` and survive h5ad serialization.
 
-- `tables/cellchat_centrality.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/cellchat_count_matrix.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/cellchat_pathways.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/cellchat_results.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/cellchat_weight_matrix.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/communication_run_summary.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/communication_spatial_points.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/communication_summary.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/communication_umap_points.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/complex_composition_table.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/complex_table.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/gene_table.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/interaction_table.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/lr_interactions.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/meta.tsv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/protein_table.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/signaling_roles.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/source_target_summary.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `tables/top_interactions.csv` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/communication_pvalue_distribution.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/communication_roles_spatial.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/communication_score_vs_significance.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/lr_dotplot.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/lr_heatmap.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/lr_spatial.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/signaling_roles.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `figures/source_target_summary.png` — written by `spatial_communication.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_communication.py`.
-- `fastccc_input.h5ad` — written by `spatial_communication.py`.
-- `input.h5ad` — written by `spatial_communication.py`.
-- `manifest.json` — written by `spatial_communication.py`.
-- `processed.h5ad` — written by `spatial_communication.py`.
-- `r_visualization.sh` — written by `spatial_communication.py`.
-- `requirements.txt` — written by `spatial_communication.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+Canonical keys are `uns["ccc_results"]`, `communication_summary`,
+`communication_signaling_roles` and `spatial_communication`.
+The selected backend also writes liana_results, cellphonedb_results,
+fastccc_results or cellchat_results. Empty results are valid tables.
 
-## Notes
+## CLI
 
-Auto-generated from `spatial_communication.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+Always on success: `processed.h5ad`, `report.md`, `result.json`,
+`reproducibility/commands.sh`, `reproducibility/requirements.txt`,
+`reproducibility/r_visualization.sh`, `figure_data/manifest.json`, and
+`figures/manifest.json`.
+
+Conditional files under `tables/`:
+
+- `lr_interactions.csv` and `top_interactions.csv`: nonempty interactions.
+- `communication_summary.csv`: nonempty aggregate.
+- `signaling_roles.csv`: nonempty population scores.
+- `source_target_summary.csv`: nonempty pair summary.
+- `cellchat_pathways.csv`, `cellchat_centrality.csv`,
+  `cellchat_count_matrix.csv`, `cellchat_weight_matrix.csv`: only when
+  CellChat supplies the corresponding nonempty table.
+
+`figure_data/` includes lr_interactions.csv, top_interactions.csv,
+communication_summary.csv, signaling_roles.csv, source_target_summary.csv
+and communication_run_summary.csv even when the corresponding data are empty.
+communication_spatial_points.csv and communication_umap_points.csv require
+their coordinates. Optional CellChat tables are also copied there.
+
+Conditional PNGs under `figures/`: lr_dotplot.png, lr_heatmap.png,
+signaling_roles.png and source_target_summary.png require suitable nonempty
+tables; lr_spatial.png, communication_roles_spatial.png and
+communication_hub_spatial.png require spatial coordinates;
+communication_hub_umap.png uses available UMAP coordinates.
+communication_pvalue_distribution.png and
+communication_score_vs_significance.png require measured p values.
+The gallery skips plots without usable data.
+
+CellPhoneDB metadata, database CSVs, FastCCC input h5ad and the CellChat RDS
+are temporary transport artifacts, not delivered report files.
+No CLI replay capsule or top-level README is promised.

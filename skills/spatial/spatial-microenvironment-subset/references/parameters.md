@@ -3,6 +3,10 @@
 
 # Parameters
 
+## Python library
+
+Call subset(adata, center_values=[...], radius_native=...); center_key defaults to a recognized label column. Pass labels as lists rather than comma-separated CLI strings. radius_native and radius_microns are exclusive. include_centers=False corresponds to --exclude-centers. The input remains unchanged; the result contains role and nearest-center distance columns.
+
 ## Allowed extra CLI flags
 
 - `--center-key`

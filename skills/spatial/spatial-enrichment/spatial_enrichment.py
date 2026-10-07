@@ -1532,7 +1532,9 @@ def main():
     _ensure_groupby_column(adata, groupby=args.groupby, parser=parser)
 
     params, method_kwargs = _collect_run_configuration(args)
-    summary = run_enrichment(
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    library.enrich(
         adata,
         method=args.method,
         groupby=args.groupby,
@@ -1546,6 +1548,7 @@ def main():
         de_corr_method=args.de_corr_method,
         **method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
 
     gallery_context = _prepare_enrichment_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

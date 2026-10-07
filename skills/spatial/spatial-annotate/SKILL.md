@@ -18,116 +18,99 @@ tags:
 
 ## When to use
 
-The user has a single-cell-per-spot spatial AnnData (Xenium / MERFISH /
-Slide-seq) OR wants a discrete per-spot label even for Visium and has
-either marker genes or a labelled scRNA reference. Four methods:
+Assign discrete cell labels using marker overlap, Tangram, scANVI or CellAssign. Use spatial-deconv for proportions and spatial-domains for tissue regions.
 
-- `marker_based` (default) — built-in marker dictionaries (`--species`,
-  `--marker-n-genes`, `--marker-padj-cutoff`); optional custom marker
-  model via `--model`. No reference needed.
-- `tangram` — gradient mapping from a labelled scRNA reference
-  (`--tangram-num-epochs`, `--tangram-train-genes`, `--tangram-device`).
-  Requires `tangram` + `torch`.
-- `scanvi` — scvi-tools scANVI semi-supervised classifier
-  (`--scanvi-n-hidden` / `--scanvi-n-latent` / `--scanvi-n-layers`,
-  `--scanvi-max-epochs`). Requires `scvi-tools` + `torch`.
-- `cellassign` — Bayesian probabilistic assignment with marker
-  matrix (`--cellassign-max-epochs`).
+## Use from a step
 
-For *proportion* deconvolution on Visium-style multi-cell spots use
-`spatial-deconv`. For tissue domains use `spatial-domains`.
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+library = load_skill("spatial-annotate")
+data = read_input("input.h5ad")
+data = library.annotate(data, cluster_key="leiden")
+write_output(library.cell_type_counts(data), "tables/results.csv")
+```
 
-## Inputs & Outputs
+Run [examples/example_step.py](examples/example_step.py) through the step runner.
 
-**Inputs**
+## API
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Outputs**
+### `annotate(adata, *, method: str='marker_based', reference=None, species: str='human', marker_genes: dict | None=None, random_state: int=0, **parameters)`
 
-- `tables/annotation_cell_type_counts.csv`
-- `tables/annotation_probabilities.csv`
-- `tables/annotation_spatial_points.csv`
-- `tables/annotation_summary.csv`
-- `tables/annotation_umap_points.csv`
-- `tables/cell_type_assignments.csv`
-- `tables/cluster_annotations.csv`
-- `tables/marker_overlap_scores.csv`
-- `figures/annotation_confidence_histogram.png`
-- `figures/annotation_confidence_spatial.png`
-- `figures/annotation_probability_heatmap.png`
-- `figures/cell_type_barplot.png`
-- `figures/cell_type_spatial.png`
-- `figures/cell_type_umap.png`
-- `figures/marker_overlap_heatmap.png`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `cell_type`; `obsm`: `tangram_ct_pred`, `scanvi_probabilities`, `cellassign_probabilities`
+Annotate in place and return the same AnnData without file writes.
 
-## Flow
+Marker and Tangram methods read log-normalized X. scANVI/CellAssign
+require raw counts in the requested layer (normally counts), raw, or
+explicitly selected X. Reference AnnData is copied before training.
 
-1. Load AnnData (`--input`) or chain through `spatial-preprocess --demo`.
-2. `parser.error` validates per-method numeric flags; raises if `--reference` is missing for tangram / scanvi; for missing reference path; for missing `--model` path.
-3. Dispatch to method:
-   - `marker_based`: run `sc.tl.rank_genes_groups` (or use `--model`), score against species marker DB.
-   - `tangram`: train Tangram mapping from scRNA → spatial, project labels.
-   - `scanvi`: train scANVI on reference + spatial, predict labels.
-   - `cellassign`: solve probabilistic assignment given marker matrix.
-4. Write `obs["cell_type"]` (Categorical); per-method extras (probabilities, marker overlap).
-5. Save `processed.h5ad`, tables, figures, `report.md`, `result.json`.
+:param adata: Spatial AnnData with normalized X and method-required labels/counts.
+:param method: CLI default marker_based; tangram, scanvi or cellassign are optional.
+:param reference: Labelled reference AnnData for Tangram/scANVI; None otherwise.
+:param species: Human by default or mouse for built-in marker dictionaries.
+:param marker_genes: Optional CellAssign marker mapping; None uses species markers.
+:param random_state: Training seed, 0 by default; change to assess sensitivity.
+:param parameters: Method keyword options in references/parameters.md. Defaults
+    match the CLI, including cluster_key=leiden and n_marker_genes=50.
+:returns: The same AnnData with cell_type labels and JSON run diagnostics.
+:raises ValueError: Invalid method, species, missing reference or invalid counts.
+:raises TypeError: Unknown method parameter.
+:raises ImportError: Missing backend; use install_skill_deps for the named package.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read annotation counts, method parameters and cluster-marker scores.
+
+:param adata: AnnData returned by annotate.
+:param keep: True retains diagnostics; False removes them before CLI serialization.
+:returns: Diagnostic dict, or an empty dict before analysis.
+
+### `cell_type_counts(adata)`
+
+Count cell labels and their percentages.
+
+:param adata: AnnData with cell_type labels; expression values are not read.
+:returns: DataFrame with cell_type, n_cells and proportion (percent).
+:raises KeyError: Annotation labels are absent.
+
+### `annotation_figure(adata)`
+
+Plot discrete cell labels in spatial coordinates.
+
+:param adata: Annotated spatial AnnData; reads coordinates and cell_type.
+:returns: A matplotlib Figure without saving it.
+:raises KeyError: Annotation labels are absent.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Marker/Tangram methods read normalized X. scANVI/CellAssign validate raw integer counts. Reference methods take reference=AnnData; marker_genes applies only to CellAssign.
+See [parameters](references/parameters.md) and [methodology](references/methodology.md).
 
 ## Gotchas
 
-- **`--reference` is required for `tangram` / `scanvi`.** `spatial_annotate.py` raises `parser.error(f"--reference is required for {args.method}")`. `marker_based` and `cellassign` can run reference-free (using marker DB or marker matrix).
-- **All numeric / file-path validation goes through `parser.error` (exit 2).** `spatial_annotate.py` for numeric ranges; for required-file paths.
-- **`--input` missing → `sys.exit(1)` via `print` (NOT `parser.error`).** Same pattern as spatial-domains. Caller wrappers expecting exit-2 get exit-1.
-- **`marker_based` species default is `human`.** `spatial_annotate.py` defaults `--species human`. For mouse data pass `--species mouse` so the built-in markers match HGNC vs MGI symbols.
-- **Probabilities matrix is method-conditional.** Only `tangram` / `scanvi` / `cellassign` produce a per-spot × celltype probability matrix. `spatial_annotate.py` writes it to `figure_data/annotation_probabilities.csv` (note: figure_data, not tables; filename is `annotation_probabilities.csv`). `marker_based` writes only the discrete `obs["cell_type"]`. Downstream tools reading probabilities must guard for absence.
-- **`obsm["spatial"]` ↔ `obsm["X_spatial"]` sync in `_prepare_annotation_plot_state`.** Same dual-key pattern as spatial-domains / spatial-deconv.
-- **Demo chains through `spatial-preprocess --demo` via subprocess.** `spatial_annotate.py` raises `RuntimeError(f"spatial-preprocess --demo failed: {result.stderr}")` on chained-run failure.
-- **Tangram requires `tangram-sc` (PyPI name) but imports as `tangram`.** `spatial_annotate.py` records this naming wart; pip install `tangram-sc`, not `tangram`.
+- `annotate` requires a reference for Tangram/scANVI. `tables/cluster_annotations.csv` is marker-method output; probabilities are method-dependent.
+- `run_info(keep=False)` removes library diagnostics before CLI serialization.
 
-## Key CLI
+## Inputs and outputs
+
+The library returns AnnData, DataFrames or Figures without file writes. The CLI
+keeps reports, result.json, tables and conditional gallery outputs. See the
+complete [output contract](references/output_contract.md) for filenames and conditions.
+
+## CLI
 
 ```bash
-# Demo (chained from spatial-preprocess --demo, marker_based)
-python skills/spatial/spatial-annotate/spatial_annotate.py --demo --output /tmp/spatial_annot_demo
-
-# Marker-based on a Visium with built-in human markers
-python skills/spatial/spatial-annotate/spatial_annotate.py \
-  --input clustered.h5ad --output results/ \
-  --method marker_based --species human --marker-n-genes 50
-
-# Tangram reference mapping
-python skills/spatial/spatial-annotate/spatial_annotate.py \
-  --input clustered.h5ad --output results/ \
-  --method tangram --reference scrna_atlas.h5ad \
-  --tangram-num-epochs 1000 --tangram-train-genes 1000
-
-# scANVI semi-supervised
-python skills/spatial/spatial-annotate/spatial_annotate.py \
-  --input clustered.h5ad --output results/ \
-  --method scanvi --reference scrna_atlas.h5ad \
-  --scanvi-n-latent 30 --scanvi-max-epochs 400 --batch-key sample
-
-# CellAssign with marker matrix
-python skills/spatial/spatial-annotate/spatial_annotate.py \
-  --input clustered.h5ad --output results/ \
-  --method cellassign --cellassign-max-epochs 200
+python skills/spatial/spatial-annotate/spatial_annotate.py --input data.h5ad --output results/spatial-annotate
 ```
 
 ## See also
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins; reference vs marker-based
-- `references/output_contract.md` — `obs["cell_type"]` / `obsm["cell_type_probabilities"]` schema
-- Adjacent skills: `spatial-preprocess` (upstream — produces clustered spatial input), `sc-cell-annotation` (upstream — labels the scRNA reference for `--reference`), `spatial-deconv` (parallel — proportion-based for multi-cell-per-spot Visium, NOT discrete labels), `spatial-domains` (parallel — label-free tissue regions; complementary to cell-type labels), `spatial-de` (downstream — DE between cell-types from this skill)
+- [Methodology](references/methodology.md)
+- [Parameters](references/parameters.md)
+- [Output contract](references/output_contract.md)
 
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `scvi-tools`, `seaborn`, `tangram-sc`, `torch`

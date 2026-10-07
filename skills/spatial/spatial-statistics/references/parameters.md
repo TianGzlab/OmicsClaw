@@ -3,6 +3,10 @@
 
 # Parameters
 
+## Python library
+
+Call analyze(adata, analysis_type=..., random_state=123, **parameters). Python options omit the CLI stats_ prefix: n_neighs, n_rings, n_perms, corr_method and two_tailed. Pass genes as a list of strings, not comma-separated text. Other options retain their underscored CLI names (ripley_mode, coocc_interval, local_moran_geoda_quads, getis_star and centrality_score). force_graph_rebuild=True replaces a cached spatial graph. run_info returns method-specific tables; results_table selects one by its *_df name.
+
 ## Allowed extra CLI flags
 
 - `--analysis-type`

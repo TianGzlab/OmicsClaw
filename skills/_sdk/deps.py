@@ -195,6 +195,24 @@ DEPENDENCIES: dict[str, dict] = {
         "install": 'Rscript -e \'install.packages("MetaboAnalystR")\'',
         "description": "MetaboAnalyst via native R scripts",
     },
+    "Matrix": {
+        "module": "Matrix",
+        "kind": "r",
+        "install": 'Rscript -e \'install.packages("Matrix")\'',
+        "description": "R sparse matrices and Matrix Market exchange",
+    },
+    "CellChat": {
+        "module": "CellChat",
+        "kind": "r",
+        "install": 'Rscript -e \'remotes::install_github("jinworks/CellChat")\'',
+        "description": "Cell-cell communication analysis in R",
+    },
+    "numbat": {
+        "module": "numbat",
+        "kind": "r",
+        "install": 'Rscript -e \'remotes::install_github("kharchenkolab/numbat")\'',
+        "description": "Allele-aware copy-number inference in R",
+    },
     "mllmcelltype": {
         "module": "mllmcelltype",
         "kind": "pip",

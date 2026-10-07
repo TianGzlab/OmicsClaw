@@ -31,14 +31,14 @@ def test_every_package_line_parses(path):
     assert names and len(set(names)) == len(names)
 
 
-def test_the_declared_names_number_68():
+def test_the_declared_names_number_71():
     names = {
         name
         for path in SKILL_FILES
         for name in parse_dependencies(path.read_text(encoding="utf-8"), source=path)
     }
-    # Spatial preprocessing adds scikit-misc and umap-learn to the 0074 declarations.
-    assert len(names) == 68
+    # Spatial migration also declares the Matrix, numbat and CellChat R backends.
+    assert len(names) == 71
     assert "cellcharter" in names
 
 

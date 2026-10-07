@@ -84,7 +84,7 @@ Start from `templates/skill/SKILL.md`, which carries this checklist inline.
 
 ### Function-library skills
 
-The 27 computational single-cell skills expose `_api.py`; their CLI handles
+The 27 computational single-cell and 16 spatial skills expose `_api.py`; their CLI handles
 arguments, reports and file output. Start from `templates/skill/README.md`
 for this pattern. Keep `__all__` explicit, import optional backends inside
 the functions that need them, and return objects rather than writing files.
@@ -98,7 +98,9 @@ python skills/_sdk/notebook/run.py api <skill-name> --write
 Test public behaviour directly; mark tests starting a skill CLI as
 `cli_subprocess`. CI runs lightweight examples and non-CLI tests separately
 from the CPU-only pertpy example. Raw-input skills `sc-count`,
-`sc-velocity-prep` and `sc-fastq-qc` stay CLI-only and use `run_cli` in steps.
+`sc-velocity-prep`, `sc-fastq-qc` and `spatial-raw-processing` stay CLI-only
+and use `run_cli` in steps. Spatial examples have a CPU CI job with fresh-kernel replay;
+the job pins the tested method dependencies rather than requiring all optional backends.
 Python/R step authoring and module acceptance are defined in `OMICSCLAW.md`.
 
 ### Step 3: Implement the script

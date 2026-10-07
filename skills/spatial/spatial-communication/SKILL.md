@@ -1,136 +1,127 @@
 ---
 name: spatial-communication
-description: Load when computing ligand-receptor cell-cell communication on a preprocessed spatial AnnData
-  with `obs[cell_type_key]` (default `leiden`) via LIANA (default), CellPhoneDB, FastCCC, or CellChat
-  (R). Skip when running scRNA-only L-R inference (use sc-cell-communication); no cell-type labels exist
-  (use spatial-annotate).
-trigger: cell communication, cell-cell communication, ligand receptor, ligand-receptor, LIANA, CellPhoneDB, FastCCC, CellChat
+description: Load when computing ligand-receptor communication on labelled spatial AnnData with LIANA, CellPhoneDB, FastCCC or CellChat. Skip unlabelled data (use spatial-annotate) and non-spatial scRNA analysis (use sc-cell-communication).
+trigger: cell communication, ligand receptor, LIANA, CellPhoneDB, FastCCC, CellChat
 tags:
 - spatial
 - communication
 - ligand-receptor
-- liana
-- cellphonedb
-- cellchat
-- fastccc
 ---
 
-# spatial-communication
+# Spatial communication
 
 ## When to use
 
-The user has a preprocessed spatial AnnData with cell-type labels
-(`obs[cell_type_key]`, default `leiden`) and wants ligand-receptor
-cell-cell communication scored. Four backends:
+Infer ligand-receptor interactions between annotated populations. LIANA is
+the default; CellPhoneDB and FastCCC need a local CellPhoneDB database.
+CellChat runs in an R subprocess. These methods do not constrain interactions
+by spatial distance: coordinates support the CLI maps, not the inference.
 
-- `liana` (default) — LIANA consensus across multiple L-R methods.
-  Tunables `--liana-expr-prop`, `--liana-min-cells`, `--liana-n-perms`.
-- `cellphonedb` — Permutation test with mean expression statistic.
-  Tunables `--cellphonedb-iterations`, `--cellphonedb-threshold`.
-- `fastccc` — Fast permutation-free percentile-based score.
-  Tunables `--fastccc-min-percentile`.
-- `cellchat_r` — CellChat (R) via `rpy2` interop. Tunables
-  `--cellchat-min-cells`, `--cellchat-prob-type`.
+## API
 
-Species: `--species human` (default) or `mouse`. For non-spatial
-L-R use `sc-cell-communication`; for pathway scoring use
-`spatial-enrichment`.
+Use `load_skill("spatial-communication")` in an analysis step.
+`examples/example_step.py` uses real PBMC expression with explicitly synthetic
+coordinates. The CLI demo uses synthetic expression and is not biological evidence.
 
-## Inputs & Outputs
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Inputs**
+### `communicate(adata, *, method='liana', cell_type_key='leiden', species='human', random_state=None, **parameters)`
 
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-- Expects `obsm`: `spatial`
+Infer ligand-receptor interactions and return the same AnnData.
 
-**Outputs**
+LIANA uses raw when present, otherwise X. Other backends read normalized
+X. Coordinates support CLI maps; these methods do not impose distance filters.
 
-- `tables/cellchat_centrality.csv`
-- `tables/cellchat_count_matrix.csv`
-- `tables/cellchat_pathways.csv`
-- `tables/cellchat_results.csv`
-- `tables/cellchat_weight_matrix.csv`
-- `tables/communication_run_summary.csv`
-- `tables/communication_spatial_points.csv`
-- `tables/communication_summary.csv`
-- `tables/communication_umap_points.csv`
-- `tables/complex_composition_table.csv`
-- `tables/complex_table.csv`
-- `tables/gene_table.csv`
-- `tables/interaction_table.csv`
-- `tables/lr_interactions.csv`
-- `tables/meta.tsv`
-- `tables/protein_table.csv`
-- `tables/signaling_roles.csv`
-- `tables/source_target_summary.csv`
-- `tables/top_interactions.csv`
-- `figures/communication_pvalue_distribution.png`
-- `figures/communication_roles_spatial.png`
-- `figures/communication_score_vs_significance.png`
-- `figures/lr_dotplot.png`
-- `figures/lr_heatmap.png`
-- `figures/lr_spatial.png`
-- `figures/signaling_roles.png`
-- `figures/source_target_summary.png`
-- `fastccc_input.h5ad`
-- `input.h5ad`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `uns`: `ccc_results`, `liana_results`, `cellphonedb_results`, `fastccc_results`, `cellchat_results`, `communication_summary`, `communication_signaling_roles`, `spatial_communication`
+:param adata: Log-normalized expression with cell-type labels; modified in place.
+:param method: CLI default liana; cellphonedb, fastccc or cellchat_r also supported.
+:param cell_type_key: CLI default leiden; obs column defining populations.
+:param species: CLI default human; mouse supported by LIANA and CellChat.
+:param random_state: None keeps LIANA seed 1337 and CellChat seed 1; CellPhoneDB uses 0.
+:param parameters: Native backend keywords in references/parameters.md.
+:returns: The same AnnData with canonical ccc_results and role summaries in uns.
+:raises ValueError: Method, labels, species or numeric controls are invalid.
+:raises ImportError: Optional backend is missing; use install_skill_deps.
+:raises FileNotFoundError: CellPhoneDB/FastCCC's local database is missing.
 
-## Flow
+### `interactions(adata, *, significant_only=False)`
 
-1. Load AnnData, validate `obs[cell_type_key]` exists with ≥ 2 categories (`_lib/communication.py`).
-2. Sync `obsm["spatial"]` ↔ `obsm["X_spatial"]` (`spatial_communication.py`); cast cell-type column to Categorical.
-3. Dispatch to chosen backend (LIANA / CellPhoneDB / FastCCC / CellChat-R).
-4. Write canonical L-R results to `uns["ccc_results"]` + per-method `uns[METHOD_RESULT_KEYS[method]]` (`_lib/communication.py`).
-5. Compute pathway-level summary, signaling roles, source-target summary.
-6. Save tables + `processed.h5ad` + report.
+Return ligand-receptor scores; unmeasured p values remain missing.
 
-## Gotchas
+:param adata: AnnData returned by communicate.
+:param significant_only: Default False; True selects real p values below 0.05.
+:returns: A new DataFrame with ligand, receptor, source, target, score and pvalue.
+:raises ValueError: No run is recorded.
 
-- **`obs[cell_type_key]` is REQUIRED — no auto-fallback.** `_lib/communication.py` raises `ValueError` when the column is missing. Run `spatial-annotate` or `spatial-domains` first.
-- **Default cell-type column is `leiden`, not `cell_type`.** `spatial_communication.py` defaults `--cell-type-key` to `"leiden"`. If your AnnData uses `cell_type`, pass `--cell-type-key cell_type` explicitly.
-- **CellChat backend needs an R install with CellChat.** `--method cellchat_r` invokes R via `rpy2`. Install CellChat in your R environment first; missing R / rpy2 / CellChat surfaces as a runtime error inside the dispatch step (not at `parser.error`), so the failure happens after argument parsing succeeds.
-- **FastCCC `--fastccc-min-percentile` must be in [0, 1].** `spatial_communication.py` rejects values outside that range with `parser.error`.
-- **Output `uns` keys are unconditionally written, even with 0 interactions.** `_lib/communication.py` writes empty `uns["ccc_results"]` / `uns["communication_summary"]` if no L-R pairs pass thresholds — distinguish "no signal" from "method failed" by inspecting `tables/communication_run_summary.csv`.
-- **Per-method copy uses `METHOD_RESULT_KEYS` mapping.** `_lib/communication.py` maps `liana → uns["liana_results"]`, `cellphonedb → uns["cellphonedb_results"]`, `fastccc → uns["fastccc_results"]`, `cellchat_r → uns["cellchat_results"]`. Downstream readers should prefer `uns["ccc_results"]` for portability.
+### `run_info(adata, *, keep=True)`
+
+Read the last run's diagnostics and optional backend tables.
+
+:param adata: AnnData returned by communicate.
+:param keep: Default True; False removes transient diagnostics for CLI serialization.
+:returns: Summary dictionary including tested/significant counts and extra_tables.
+:raises ValueError: No communication run is recorded.
+
+### `roles_figure(adata, *, n_top=20)`
+
+Plot population sender and receiver scores without file writes.
+
+:param adata: AnnData returned by communicate.
+:param n_top: Default 20 populations; use fewer for a smaller figure.
+:returns: A matplotlib Figure, explicitly labelled when no scores exist.
+:raises ValueError: No run is recorded or n_top is not positive.
+
+<!-- api:end -->
 
 ## Key CLI
 
 ```bash
-# Demo
-python skills/spatial/spatial-communication/spatial_communication.py --demo --output /tmp/comm_demo
-
-# LIANA consensus (default)
 python skills/spatial/spatial-communication/spatial_communication.py \
-  --input preprocessed.h5ad --output results/ \
-  --method liana --species human --cell-type-key cell_type \
-  --liana-expr-prop 0.1 --liana-min-cells 5 --liana-n-perms 1000
-
-# CellPhoneDB permutation test
+  --input processed.h5ad --output results/communication \
+  --cell-type-key cell_type --method liana --liana-n-perms 1000
 python skills/spatial/spatial-communication/spatial_communication.py \
-  --input preprocessed.h5ad --output results/ \
-  --method cellphonedb --cellphonedb-iterations 1000 --cellphonedb-threshold 0.1
-
-# CellChat (R via rpy2)
-python skills/spatial/spatial-communication/spatial_communication.py \
-  --input preprocessed.h5ad --output results/ \
-  --method cellchat_r --species mouse \
-  --cellchat-min-cells 10 --cellchat-prob-type triMean
+  --demo --output /tmp/communication_demo
 ```
 
-## See also
+## Inputs & Outputs
 
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — when each backend wins
-- `references/output_contract.md` — `uns["ccc_results"]` schema + per-method copies
-- Adjacent skills: `spatial-annotate` (upstream — provides `obs[cell_type_key]`), `spatial-domains` (upstream alternative — Leiden domains), `sc-cell-communication` (parallel — non-spatial L-R), `spatial-condition` (parallel — DE between conditions), `spatial-enrichment` (parallel — pathway scoring)
+Input is log-normalized AnnData with at least two populations in
+`obs[cell_type_key]` (default `leiden`). LIANA reads `raw` when present;
+other methods read `X`. Use gene symbols, not synthetic feature identifiers.
+LIANA and CellChat support human and mouse; the other wrappers support human.
+
+The API mutates and returns the same object, preserving observation and
+feature order. It stores `uns["ccc_results"]`, method-specific results,
+`communication_summary`, `communication_signaling_roles`, and diagnostics.
+`interactions` returns a new DataFrame; `roles_figure` returns a Figure.
+Library calls do not create report directories. Optional external tools use
+temporary files that are removed after execution.
+
+The CLI writes `processed.h5ad`, `report.md`, `result.json`, reproducibility
+commands, figure-data CSVs, and conditional tables/figures.
+See [output inventory](references/output_contract.md) for exact conditions.
+
+## Gotchas
+
+- `_api.py:communicate` rejects absent labels and populations with fewer than
+  two distinct labels; it does not substitute a different annotation.
+- `uns["ccc_results"]` has missing p values when the backend supplies no
+  statistical test. LIANA specificity ranks are not p values.
+- `tables/lr_interactions.csv` is absent when no interactions are returned;
+  an empty result does not establish absence of biological communication.
+- `_api.py:communicate` raises an install hint for missing backends.
+  CellPhoneDB/FastCCC also require a local database; no substitute is generated.
+- `rscripts/cellchat.R` needs Rscript, Matrix and CellChat, not rpy2.
+- `_api.py:communicate` defaults to LIANA seed 1337, CellPhoneDB 0 and
+  CellChat 1; FastCCC has no seed argument.
+
+## References
+
+- [Parameters](references/parameters.md): CLI-to-library keyword mapping.
+- [Methodology](references/methodology.md): matrix and statistical semantics.
+- [Output contract](references/output_contract.md): files and AnnData keys.
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
+`anndata`, `cellphonedb`, `fastccc`, `liana`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`, `CellChat`, `Matrix`
 
-`anndata`, `cellphonedb`, `fastccc`, `liana`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`
+The R backend requires an Rscript executable.

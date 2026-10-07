@@ -34,7 +34,7 @@ terminal, in the desktop app and on chat platforms.
 
 ## What's new
 
-- All 27 computational single-cell skills now have function libraries, three raw-input skills remain CLI-only, and project modules can mix Python and R steps with IO tracking, replay and review before acceptance ([0074](docs/plans/0074-singlecell-skill-migration.md)).
+- The 27 single-cell and 16 spatial analysis skills expose function libraries and replayable examples; four raw-input skills stay CLI-only, and modules support Python/R steps with IO tracking and review before acceptance ([0074](docs/plans/0074-singlecell-skill-migration.md), [0075](docs/plans/0075-spatial-skill-migration.md)).
 - A real-model routing eval (`tests/evals/live/`, run by hand) measures whether the model picks the right skill for 26 seed requests, the CI unit-test job now also runs the launch shell, attachments, top-level and desktop HTTP tests, and the four consensus skills whose scripts could not start have since been deleted ([0068](docs/plans/0068-eval-hardening.md), [0070](docs/plans/0070-notebook-skill-runtime.md)).
 - The agent framework has been rebuilt around three entry points, `oc cli`, `oc desktop` and `oc channel`, and the old `oc interactive`, `oc tui`, `oc onboard` and `oc run` commands are gone ([rebuild status](docs/FRAMEWORK-REBUILD.md)).
 - The Desktop App works with the rebuilt backend, including remote mode over SSH and setting up a model from the App ([0064](docs/plans/0064-desktop-app-alignment.md), [0065](docs/plans/0065-desktop-management-pages-and-retirement.md), [0066](docs/plans/0066-desktop-remote-mode.md)).
@@ -146,8 +146,8 @@ library. The dependency lists are [`environment.yml`](environment.yml) and
 
 | Domain | Skills | Examples | Guide |
 |---|---|---|---|
-| Spatial transcriptomics | 19 | QC, domains, annotation, deconvolution, CNV, trajectory | [spatial](docs/domains/spatial.mdx) |
-| Single-cell omics | 34 | QC, clustering, annotation, doublets, velocity, GRN | [singlecell](docs/domains/singlecell.mdx) |
+| Spatial transcriptomics | 17 | QC, domains, annotation, deconvolution, CNV, trajectory | [spatial](docs/domains/spatial.mdx) |
+| Single-cell omics | 30 | QC, clustering, annotation, doublets, velocity, GRN | [singlecell](docs/domains/singlecell.mdx) |
 | Genomics | 10 | QC, alignment, variants, CNV, assembly, epigenomics | [genomics](docs/domains/genomics.mdx) |
 | Proteomics | 8 | DIA/DDA, PTM, networks, biomarkers | [proteomics](docs/domains/proteomics.mdx) |
 | Metabolomics | 8 | Peaks, normalization, annotation, pathways | [metabolomics](docs/domains/metabolomics.mdx) |

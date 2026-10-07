@@ -3,6 +3,24 @@
 
 # Parameters
 
+## Library keywords
+
+`communicate(adata, method=..., cell_type_key=..., species=..., random_state=...)`
+accepts backend controls through these native keywords, not CLI-prefixed names:
+
+| Method | CLI prefix | Native keywords |
+|---|---|---|
+| liana | `--liana-` | `resource`, `expr_prop`, `min_cells`, `n_perms` |
+| cellphonedb | `--cellphonedb-` | `threshold`, `iterations` |
+| fastccc | `--fastccc-` | `single_unit_summary`, `complex_aggregation`, `lr_combination`, `min_percentile` |
+| cellchat_r | `--cellchat-` | `prob_type`, `min_cells` |
+
+Hyphens become underscores and the method prefix is removed. Defaults match
+the tables below. `random_state=None` selects LIANA 1337, CellPhoneDB 0,
+or CellChat 1; an integer overrides the selected backend seed. FastCCC
+does not expose a seed and ignores this argument. Older CellPhoneDB calls
+were unseeded; the library and CLI now use 0 for repeatability.
+
 ## Allowed extra CLI flags
 
 - `--cell-type-key`

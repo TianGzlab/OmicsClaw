@@ -518,7 +518,11 @@ def _render_score_pvalue_scatter(_adata, spec: PlotSpec, context: dict) -> objec
 
     plot_df = lr_df.copy()
     plot_df["score"] = pd.to_numeric(plot_df["score"], errors="coerce").fillna(0.0)
-    plot_df["pvalue"] = pd.to_numeric(plot_df["pvalue"], errors="coerce").fillna(1.0).clip(lower=1e-12)
+    plot_df["pvalue"] = pd.to_numeric(plot_df["pvalue"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["pvalue"])
+    if plot_df.empty:
+        return None
+    plot_df["pvalue"] = plot_df["pvalue"].clip(lower=1e-12)
     plot_df["neg_log10_pvalue"] = -np.log10(plot_df["pvalue"])
 
     fig, ax = plt.subplots(figsize=spec.params.get("figure_size", (7.5, 5.5)), dpi=200)
@@ -1150,13 +1154,16 @@ def main() -> None:
         sys.exit(1)
 
     params, method_kwargs = _collect_run_configuration(args)
-    summary = run_communication(
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    library.communicate(
         adata,
         method=args.method,
         cell_type_key=args.cell_type_key,
         species=args.species,
-        method_params=method_kwargs,
+        **method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
 
     gallery_context = _prepare_communication_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

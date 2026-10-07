@@ -1692,8 +1692,9 @@ def main():
 
     params, method_kwargs = _collect_run_configuration(args)
 
-    if args.method in SCANPY_METHODS:
-        summary = run_de(
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    library.differential_expression(
             adata,
             groupby=args.groupby,
             method=args.method,
@@ -1704,17 +1705,7 @@ def main():
             log2fc_threshold=args.log2fc_threshold,
             **method_kwargs,
         )
-    else:
-        summary = run_pydeseq2(
-            adata,
-            groupby=args.groupby,
-            group1=str(args.group1),
-            group2=str(args.group2),
-            n_top_genes=args.n_top_genes,
-            fdr_threshold=args.fdr_threshold,
-            log2fc_threshold=args.log2fc_threshold,
-            **method_kwargs,
-        )
+    summary = library.run_info(adata, keep=False)
 
     gallery_context = _prepare_de_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

@@ -1,68 +1,36 @@
-## Output Structure
+# CLI-only output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── manifest.json
-├── omicsclaw_stpipeline_run.json
-├── r_visualization.sh
-├── raw_counts.h5ad
-├── st_pipeline.stderr.txt
-├── st_pipeline.stdout.txt
-├── tables/
-│   ├── gene_qc.csv
-│   ├── raw_gene_qc.csv
-│   ├── raw_processing_run_summary.csv
-│   ├── raw_processing_spatial_points.csv
-│   ├── raw_spot_qc.csv
-│   ├── raw_top_genes.csv
-│   ├── run_summary.csv
-│   ├── saturation_curve.csv
-│   ├── spatial_coordinates.csv
-│   ├── spot_qc.csv
-│   ├── stage_summary.csv
-│   └── top_genes.csv
-└── figures/
-    ├── raw_detected_genes_spatial.png
-    ├── raw_spot_qc_histograms.png
-    ├── raw_top_genes_barplot.png
-    ├── raw_total_counts_spatial.png
-    ├── st_pipeline_saturation_curve.png
-    └── st_pipeline_stage_attrition.png
-```
+ST-Pipeline is an external FASTQ workflow. Steps invoke this skill with run_cli;
+there is no in-memory _api.py. Demo mode creates synthetic upstream outputs
+and checks conversion/reporting, not FASTQ alignment.
 
-## File contents
+## Outputs
 
-- `tables/gene_qc.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/raw_gene_qc.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/raw_processing_run_summary.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/raw_processing_spatial_points.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/raw_spot_qc.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/raw_top_genes.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/run_summary.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/saturation_curve.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/spatial_coordinates.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/spot_qc.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/stage_summary.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `tables/top_genes.csv` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `figures/raw_detected_genes_spatial.png` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `figures/raw_spot_qc_histograms.png` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `figures/raw_top_genes_barplot.png` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `figures/raw_total_counts_spatial.png` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `figures/st_pipeline_saturation_curve.png` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `figures/st_pipeline_stage_attrition.png` — written by `spatial_raw_processing.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_raw_processing.py`.
-- `manifest.json` — written by `spatial_raw_processing.py`.
-- `omicsclaw_stpipeline_run.json` — written by `spatial_raw_processing.py`.
-- `r_visualization.sh` — written by `spatial_raw_processing.py`.
-- `raw_counts.h5ad` — written by `spatial_raw_processing.py`.
-- `st_pipeline.stderr.txt` — written by `spatial_raw_processing.py`.
-- `st_pipeline.stdout.txt` — written by `spatial_raw_processing.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+- `raw_counts.h5ad`: raw counts in X, layers['counts'] and raw; spatial coordinates
+  in obsm['spatial']. No normalization or clustering has run.
+- `report.md` and `result.json`: input, method, parameters and upstream statistics.
+- Always exported tables: `tables/run_summary.csv`, `tables/stage_summary.csv`,
+  `tables/spot_qc.csv`, `tables/gene_qc.csv`, `tables/top_genes.csv`.
+- `tables/spatial_coordinates.csv` requires coordinate data;
+  `tables/saturation_curve.csv` requires upstream saturation metrics.
+- Plot data: `figure_data/raw_processing_run_summary.csv`, `figure_data/stage_summary.csv`,
+  `figure_data/raw_spot_qc.csv`, `figure_data/raw_gene_qc.csv`, `figure_data/raw_top_genes.csv`.
+- `figure_data/raw_processing_spatial_points.csv` and `figure_data/saturation_curve.csv`
+  require coordinate/saturation data respectively.
+- `figures/manifest.json` and `figure_data/manifest.json` inventory the gallery.
+- `reproducibility/commands.sh`, `reproducibility/requirements.txt`,
+  `reproducibility/r_visualization.sh` record CLI and rendering instructions.
 
-## Notes
+## Figures
 
-Auto-generated from `spatial_raw_processing.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+- `figures/raw_total_counts_spatial.png` and `figures/raw_detected_genes_spatial.png`:
+  available coordinates and spot QC.
+- `figures/raw_spot_qc_histograms.png`: nonempty spot metrics.
+- `figures/raw_top_genes_barplot.png`: nonempty gene metrics.
+- `figures/st_pipeline_stage_attrition.png`: upstream stage metrics.
+- `figures/st_pipeline_saturation_curve.png`: upstream saturation metrics.
+
+Real pipeline runs may also produce `omicsclaw_stpipeline_run.json`,
+`st_pipeline.stdout.txt`, `st_pipeline.stderr.txt` and native count/log files.
+The synthetic demo does not promise these real-process logs.
+The next analysis step is spatial-preprocess on raw_counts.h5ad.

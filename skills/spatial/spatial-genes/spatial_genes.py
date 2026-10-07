@@ -1262,13 +1262,17 @@ def main():
                 args.method,
             )
 
-    run_fn = METHOD_DISPATCH[args.method]
-    svg_df, summary = run_fn(
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
+    library.spatial_genes(
         adata,
+        method=args.method,
         n_top_genes=args.n_top_genes,
         fdr_threshold=args.fdr_threshold,
         **method_kwargs,
     )
+    svg_df = library.results(adata)
+    summary = library.run_info(adata, keep=False)
 
     adata.uns["spatial_genes_results"] = svg_df.copy()
     adata.uns["spatial_genes_summary"] = summary.copy()

@@ -45,7 +45,6 @@ from skills.spatial._lib.trajectory import (
     METHOD_PARAM_DEFAULTS,
     SUPPORTED_METHODS,
     detect_cluster_key,
-    run_trajectory,
 )
 from skills.spatial._lib.viz import (
     PlotSpec,
@@ -1546,14 +1545,20 @@ def main() -> None:
     params, method_kwargs = _collect_run_configuration(args)
     params["cluster_key"] = resolved_cluster_key
 
-    summary = run_trajectory(
+    from skills._sdk.notebook import load_skill
+
+    library = load_skill(SKILL_NAME)
+    library.trajectory(
         adata,
         method=args.method,
         cluster_key=resolved_cluster_key,
         root_cell=args.root_cell,
         root_cell_type=args.root_cell_type,
-        **method_kwargs,
+        method_params=method_kwargs,
     )
+    summary = library.run_info(adata, keep=False)
+    summary.pop("random_state", None)
+    summary.pop("palantir_waypoint_seed", None)
 
     gallery_context = _prepare_trajectory_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)

@@ -1,68 +1,39 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── r_visualization.sh
-├── requirements.txt
-├── tables/
-│   ├── enrichment_group_metrics.csv
-│   ├── enrichment_results.csv
-│   ├── enrichment_run_summary.csv
-│   ├── enrichment_significant.csv
-│   ├── enrichment_spatial_points.csv
-│   ├── enrichment_term_group_scores.csv
-│   ├── enrichment_umap_points.csv
-│   ├── ranked_markers.csv
-│   └── top_enriched_terms.csv
-└── figures/
-    ├── enrichment_barplot.png
-    ├── enrichment_dotplot.png
-    ├── enrichment_group_metrics.png
-    ├── enrichment_group_spatial_context.png
-    ├── enrichment_group_top_stat_spatial.png
-    ├── enrichment_group_top_stat_umap.png
-    ├── enrichment_pvalue_distribution.png
-    ├── enrichment_score_distribution.png
-    ├── enrichment_score_violin.png
-    ├── enrichment_spatial_scores.png
-    └── top_enriched_terms.png
-```
+Functions return the same AnnData, DataFrames and a Figure without writing
+output files. AnnData stores `uns['enrichment_results']` and the executed
+method's alias. ssGSEA additionally attaches group-mean score columns to obs.
+The transient JSON diagnostic record is removed by the CLI before serialization.
 
-## File contents
+The CLI writes `processed.h5ad`, `report.md`, `result.json`, `reproducibility/commands.sh`,
+`reproducibility/requirements.txt` and `reproducibility/r_visualization.sh`.
 
-- `tables/enrichment_group_metrics.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_results.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_run_summary.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_significant.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_spatial_points.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_term_group_scores.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_umap_points.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/ranked_markers.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `tables/top_enriched_terms.csv` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_barplot.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_dotplot.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_group_metrics.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_group_spatial_context.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_group_top_stat_spatial.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_group_top_stat_umap.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_pvalue_distribution.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_score_distribution.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_score_violin.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/enrichment_spatial_scores.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `figures/top_enriched_terms.png` — written by `spatial_enrichment.py` (or its imported `_lib/` helpers).
-- `commands.sh` — written by `spatial_enrichment.py`.
-- `manifest.json` — written by `spatial_enrichment.py`.
-- `processed.h5ad` — written by `spatial_enrichment.py`.
-- `r_visualization.sh` — written by `spatial_enrichment.py`.
-- `requirements.txt` — written by `spatial_enrichment.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Tables
 
-## Notes
+- `tables/enrichment_results.csv`: all tested terms.
+- `tables/enrichment_significant.csv`: rows passing the adjusted-p-value threshold;
+  empty for descriptive ssGSEA scores.
+- `tables/ranked_markers.csv`: input ranks for ORA/GSEA; empty for ssGSEA.
+- `tables/top_enriched_terms.csv` and `tables/enrichment_group_metrics.csv`:
+  display selections and group summaries.
+- `tables/enrichment_run_summary.csv` and `tables/enrichment_term_group_scores.csv`:
+  run metadata and the term-by-group score table.
+- `tables/enrichment_spatial_points.csv` and `tables/enrichment_umap_points.csv`:
+  only when the corresponding coordinates exist.
 
-Auto-generated from `spatial_enrichment.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+## Conditional figures
+
+- `figures/enrichment_group_spatial_context.png`: labels and spatial coordinates.
+- `figures/enrichment_barplot.png` and `figures/enrichment_dotplot.png`: nonempty results.
+- `figures/enrichment_group_top_stat_spatial.png` and
+  `figures/enrichment_group_top_stat_umap.png`: group statistics and respective coordinates.
+- `figures/enrichment_spatial_scores.png`: ssGSEA columns and spatial coordinates.
+- `figures/enrichment_score_violin.png`: ssGSEA columns and labels.
+- `figures/top_enriched_terms.png`: nonempty top-term table.
+- `figures/enrichment_group_metrics.png`: group metrics.
+- `figures/enrichment_pvalue_distribution.png`: at least one adjusted p value.
+- `figures/enrichment_score_distribution.png`: nonempty score table.
+
+The gallery writes `figure_data/manifest.json` and per-plot data. Failed plots
+are logged. Missing p values stay missing; ssGSEA group scores do not supply
+per-spot significance tests.
