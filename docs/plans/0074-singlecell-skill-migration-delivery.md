@@ -2,7 +2,7 @@
 
 日期：2026-10-07。基准：`4bd83b1e`。规格：旁边的 `0074-singlecell-skill-migration.md`。本记录随分期验收更新。
 
-当前状态：范围为整个 M0–M9。N1 c、M0–M8 已实现并完成本地针对性验证；M4 独立审核的三项问题已修复。M9 端到端与整批两轴审核进行中。本地分支为 `feat/0074-singlecell-library-migration`，不自动推送或创建 PR，本记录不表示整批已经交付。
+当前状态：N1 c、M0–M9 的本地实施与验收已完成；Standards、Spec 独立审核各五项发现全部关闭，M9 六项核心检查通过。交付在本地分支 `feat/0074-singlecell-library-migration`，未推送或创建 PR。外部待验、既有框架失败和端到端偏差在下面单独列明，不包含在本地通过结论中。
 
 ## N1 c：pertpy 安装核验
 
@@ -59,7 +59,7 @@ sc-filter、sc-markers 提供函数库、薄 CLI、生成 API 段和真实示例
 
 真实 R 测试覆盖 CSV/RDS/PNG、用户 profile 隔离、独立运行、路径错误、H5AD 提示、冻结保护、外层 shell 退出后的 Rscript 清理，以及 IO 文件被删后留下失败记账。`OmicsClaw` Python + R 4.3.3：13 passed/7.43 秒。干净 M1 venv + 系统 R 4.1.2：13 passed/4.87 秒。`rapids_singlecell` 下 `tests/sdk/notebook -k 'not skill_api_sections' -m 'not skill_example'`：228 passed/40.21 秒；施工中的 API 段和科学示例单独按期验证。加入双 runner 分派测试后，`test_executor.py` 31 passed/3.27 秒。真实 GitHub Actions 的 apt 安装耗时和只读 Docker 运行尚未验证。
 
-独立审核复现三项问题：SIGINT/SIGTERM 后 R 继续写文件；符号链接换目标后仍显示 up-to-date；`tables/./x` 被误判为孤立输出。证据在 `/tmp/omicsclaw-0074-m4-review.dq0afI/`。新增测试分别先失败，再修复进程回收、输入逻辑路径和输出标准化。SIGTERM 经前台入口的终止处理记 failed ledger；SIGINT 保留部分 notebook。修复后真实 R 17 passed/11.17 秒，执行器相关 233 passed/44.47 秒。尚待最终两轴审核复查。
+独立审核复现三项问题：SIGINT/SIGTERM 后 R 继续写文件；符号链接换目标后仍显示 up-to-date；`tables/./x` 被误判为孤立输出。证据在 `/tmp/omicsclaw-0074-m4-review.dq0afI/`。新增测试分别先失败，再修复进程回收、输入逻辑路径和输出标准化。SIGTERM 经前台入口的终止处理记 failed ledger；SIGINT 保留部分 notebook。修复后真实 R 17 passed/11.17 秒，执行器相关 233 passed/44.47 秒。整批两轴复查及 M9 真实 R 验收已完成，见后文。
 
 ## M5：通路、基因程序、丰度和通信
 
@@ -109,12 +109,37 @@ sc-multi-count、scatac-preprocessing 完成 API、CLI、示例及输出文档�
 
 本节原始日志集中在 `/tmp/omicsclaw-0074-final.nBqCmC/`。变更过的 clustering、pathway、gene-programs、multi-count、ATAC 的 20 项 parity 已再次通过（169.82 秒）；pertpy/prep 八项通过（34.04 秒），velocity 四项通过（58.96 秒）。脚本化 eval 为 29 passed（26.82 秒），notebook 非示例、非诊断测试为 262 passed（46.54 秒）。
 
-第二轮独立审核的剩余诊断清理和新增 velocity 方向检查已修复，等待最后复查。三个真实 CLI 的内部诊断清理回归先 3 failed、后 3 passed（37.39 秒）。velocity 的已知方向检查及反向速度拒绝测试通过；撤去方向检查后，反向测试确实失败，恢复后两项再通过（33.36 秒）。真实端到端两次混淆 `cluster_summary.top_gene` 与 `top_effect`，因此补清它们不是同一基因/效应对的文档，未改算法和表结构。全域 help 探针和独立工作目录调用为 11 passed（59.40 秒）。
+第二轮独立审核的剩余诊断清理和新增 velocity 方向检查已修复，末轮复查通过。三个真实 CLI 的内部诊断清理回归先 3 failed、后 3 passed（37.39 秒）。velocity 的已知方向检查及反向速度拒绝测试通过；撤去方向检查后，反向测试确实失败，恢复后两项再通过（33.36 秒）。真实端到端两次混淆 `cluster_summary.top_gene` 与 `top_effect`，因此补清它们不是同一基因/效应对的文档，未改算法和表结构。全域 help 探针和独立工作目录调用为 11 passed（59.40 秒）。
 
-## M9：真实模型验收进行中
+末轮审查固定到 `1b883307`，Standards 五项、Spec 五项分别全部关闭，没有新增发现。两位 reviewer 独立执行真实 CLI 保存检查、正常和反向 velocity 示例；Spec 还独立验证撤去方向断言后的负对照。完整命令范围、时长及结论分轴保留在实现审核中。
+
+末次三个 CLI 清理后，metacell、pseudotime、velocity 的 12 项 CLI/API parity 全部再通过（157.34 秒）。最终目录核验为 88 个技能、0 skipped；单细胞 30 个，其中 27 个函数库及 `sc-count`、`sc-fastq-qc`、`sc-velocity-prep` 三个 CLI_ONLY。
+
+交付文档更新后的索引、API 段、依赖清单和声明检查为 141 passed（6.57 秒），`git diff --check` 无输出。实现审核固定到 `1b883307`；此后的提交仅整理计划状态、交付记录、审核结果和 CHANGELOG，没有再修改实现。
+
+## M9：真实模型验收
 
 首轮课题 `/tmp/oc0074-e2e/project` 的四个模块均已 ACCEPTED/frozen。模块 01–03 只调用函数库；模块 04 记录 R 4.3.3、Seurat 5.3.0、SeuratObject 5.2.0，五个 R cell 均执行。独立副本单独运行 R 后，两张 CSV 与原件逐值且逐字节一致；修改模块 03 的 marker 生成步骤并重跑后，模块 04 的 R 步骤明确显示 `input changed`。
 
 这一轮只通过 5/6 项验收：主 agent 读了三次 SDK 源码，并为修正审核格式改写了 reviewer 回复，违反约定。这些行为保留在 `interventions.md` 和 `audit.json`，不把最终四个 ACCEPTED 当作整体验收通过。首轮共 100 次主线、87 次 reviewer 模型调用，六次真实审查，合计 2,182 秒。
 
-全新课题 `/tmp/oc0074-e2e-clean.OXUCNs/project`、会话 `E2E-0074-CLEAN` 正在重跑。实施者只给任务、缓存路径、离线富集偏好和原样保存审核的规则，没有替模型写步骤或提供结果。最终调用数、源码读取数和六项验收待完成后记录。sandbox 和真实 GitHub Actions 首跑仍留待 owner 的机器与远端权限验证。
+全新课题 `/tmp/oc0074-e2e-clean.OXUCNs/project`、会话 `E2E-0074-CLEAN` 的六项核心验收已通过。使用部署配置的 `deepseek-v4-flash`；实施者只给任务、缓存路径、离线富集偏好和原样保存审核的规则，没有替模型写步骤或提供结果。每个模块先由真实 module-reviewer 审查，再明确接受。
+
+| 计划 §7.2 项目 | 实测证据 |
+|---|---|
+| 四模块 ACCEPTED | `01_qc_filter`、`02_preprocess_cluster`、`03_markers_enrichment`、`04_seurat_bcell_crosscheck` 的 manifest 均为 accepted、frozen=true |
+| 前三模块用函数库 | QC、doublet、filter、preprocess、cluster、markers、ora 调用均有记录，skill_cli 为 0；preprocess 明确 `apply_filters=False` |
+| 真实 R 步骤 | manifest 的 kind=r；R 4.3.3、Seurat 5.3.0、SeuratObject 5.2.0 进入 r_session；五个 R cell 执行序号 1–5，其中三个有 stream、两个静默；混合 replay 成功，brief 包含 R 步骤，拼接 notebook 用 markdown 表示 R |
+| 上游变动使 R 过期 | 在课题副本中修改 marker 生成步骤，仅反转输出行序，真实重跑后 `02_seurat_findmarkers.R` 显示 `stale: input changed: results/03_markers_enrichment/tables/markers_all.csv` |
+| R 单独运行一致 | 在副本中用普通 Rscript 执行，同一 1614×6 marker CSV 和 10×2 记录 CSV 均逐值、逐字节一致；另核对导出的 13603×2602 MTX 与原 counts 逐元素相等，特征、细胞和标签顺序相同 |
+| SDK 源码预算 | 仅一次 reviewer 读取 `skills/_sdk/notebook/checks.py` 的尝试，路径不存在，返回 0 字符；按尝试计数仍为 1，满足不超过 1 次 |
+
+重跑也有两类额外 prompt 偏差，不将其说成完全无偏差：M02 曾把执行日志写到课题外的 `/tmp/val.log` 和 `/tmp/replay2.log`；其 APPROVE 审查副本把三个技能名中的不换行连字符换成 ASCII 连字符，不是逐字保存，但 verdict、问题和论据未改。原回复、存档和精确 diff 都保留在 `audit.json`。这两类偏差不改变上述六项验收结果，也不代表运行时已强制实现目录限制或审查原文不可变。
+
+真实审查中，M02 因缺少矩阵和原始 counts 的逐元素证据被要求修改，模型补验证后再审通过；M03 因把组内最大效应归给另一基因被要求修改，模型改成逐基因表后通过。M04 的 validate 初次把最显著基因 CD79A 误作最大效应基因，模型自行纠正为 IGLL5 后重放通过。实施者没有代写这些修复。
+
+完整证据在 `/tmp/oc0074-e2e-clean.OXUCNs/`：`audit.json`（调用、审查和源码读取）、`verification.json`（独立 CSV 和导出核对）、`standalone-r.log`、`stale-run.log`、`stale-status.log`、`execution-notes.md` 及原始 `logs/`。四轮分析合计 103 次主模型、79 次 reviewer 调用，六次审查，1,828 秒。
+
+最后明确接受的独立模型 turn 在约第 6 秒成功执行 accept，此后 provider 的收尾回复未返回。等候共 397 秒后，只对该验证驱动进程发送 SIGINT，finally 保留 trace，退出码 130，无残留驱动或 R 进程；未中断其他任务或更改已验收输出。这一回合至少完成一次产生工具调用的模型响应，完整请求数、engine outcome 和 token usage 未知，不记为零或 converged。总计至少 104 次已完成主模型调用；已观测的回合耗时合计 2,225 秒，不含回合间停顿及独立副本检查。六次审查共 815.32 秒。`accept-interruption.json` 保留这项限制，六项功能验收不依赖缺失的最终自然语言回复。
+
+外部待验仍为真实 GitHub Actions 首跑和只读容器/sandbox；本次未推送代码、创建 PR 或更改远端 required checks。缺包和缺数据库的科学后端仍按各期列为未验证，没有用协议测试替代真实算法验证。

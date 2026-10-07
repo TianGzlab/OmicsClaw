@@ -1,6 +1,6 @@
 # 计划 0074：单细胞其余 26 个 skill 迁移到函数库形态，加上 R 步骤
 
-**状态**：第 3 版实施中（2026-10-07）。第 1 版经独立审核（`docs/plans/0074-singlecell-skill-migration-review.md`），第 2 版已接受该轮审核意见。owner 随后对 N1 选择 c：先用 overlay 安装 pertpy、核实依赖，再按原计划迁移 sc-perturb，并确认本次完成整个 M0–M9、交付审核结果。本版补入这项裁定及实测证据；各期实现、验证和审核状态见 `0074-singlecell-skill-migration-delivery.md`。
+**状态**：第 3 版已完成本地实施与验收（2026-10-07）。按 owner 的 N1 c 裁定完成 pertpy overlay 核验和 M0–M9；单细胞现有 27 个函数库、3 个 CLI_ONLY，支持混合 Python/R 步骤。Standards、Spec 独立审核各五项发现均已修复关闭，M9 六项核心验收通过。真实 GitHub Actions 与只读容器仍为外部待验，不在本地通过结论内；两条既有框架测试失败、实际后端覆盖范围及端到端的额外 prompt 偏差均见 `0074-singlecell-skill-migration-delivery.md`。实现审核见 `0074-singlecell-skill-migration-implementation-review.md`，原计划审核另保留在 `0074-singlecell-skill-migration-review.md`。
 
 ### 修订说明
 
