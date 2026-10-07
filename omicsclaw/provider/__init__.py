@@ -30,7 +30,7 @@ adapter class at all — that is the coupling this package exists to absorb.
 
 from ._model_limits import DEFAULT_MODEL_LIMITS, ModelLimits, get_model_limits
 from .anthropic_provider import AnthropicProvider
-from .base import Completion, LLMProvider, ProviderError
+from .base import Completion, LLMProvider, ProviderDeadlineExceeded, ProviderError
 from .config import (
     DETECT_ORDER,
     PRESETS,
@@ -56,6 +56,7 @@ __all__ = [
     "ModelLimits",
     "OpenAIProvider",
     "ProviderConfig",
+    "ProviderDeadlineExceeded",
     "ProviderDialect",
     "ProviderError",
     "ProviderPreset",

@@ -39,7 +39,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 
-from omicsclaw.provider import ProviderError
+from omicsclaw.provider import ProviderDeadlineExceeded, ProviderError
 
 from .config import EngineConfig
 from .types import EngineEvent
@@ -224,6 +224,8 @@ def _budget_for(
     generously when it names a transport fault and on the ordinary
     allowance when it does not.
     """
+    if isinstance(error, ProviderDeadlineExceeded):
+        return None
     status = error.status_code
     if status is None:
         return network if _looks_like_transport(str(error)) else default

@@ -12,6 +12,7 @@ by sha256) and unfreezes the module.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from pathlib import Path
@@ -89,6 +90,35 @@ def _review_problem(module: Module, review: str, replay_at: float | None) -> tup
         return f"{path.name} does not start with `VERDICT: APPROVE`", None
     if replay_at is None or mtime <= replay_at:
         return f"{path.name} is older than the latest replay: review the replayed module again", None
+    if path.name.startswith("task-review-"):
+        try:
+            receipt_path = path.with_suffix(".json")
+            if receipt_path.resolve().parent != path.resolve().parent:
+                raise ValueError("receipt leaves the review directory")
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict) or not isinstance(receipt.get("files"), dict):
+                raise ValueError("receipt must contain a file-hash mapping")
+            if receipt["schema"] != 1 or receipt["module"] != module.name:
+                raise ValueError("receipt schema or module does not match")
+            if receipt["review_sha256"] != _hashing.sha256_file(path):
+                return "review text changed since delegation; request a fresh review", None
+            replay = (_manifest.load(module) or {}).get("replay")
+            if receipt["replay"] != replay:
+                return "review belongs to a different replay; request a fresh review", None
+            required = {f"analysis/{module.name}/README.md",
+                        f"results/{module.name}/{module.report_name}",
+                        f"results/{module.name}/{_layout.LAYOUT['review_brief']}"}
+            required.update(f"analysis/{module.name}/{name}" for name in replay["step_sha256"])
+            if set(receipt["files"]) != required:
+                raise ValueError("receipt file inventory does not match the module")
+            for name, sha in receipt["files"].items():
+                source = module.root / name
+                if not source.resolve().is_relative_to(module.root.resolve()):
+                    raise ValueError("reviewed file leaves the project")
+                if not source.is_file() or _hashing.sha256_file(source) != sha:
+                    return "reviewed files changed since delegation; request a fresh review", None
+        except (OSError, ValueError, KeyError, TypeError):
+            return "review receipt is missing or invalid; request a fresh review", None
     return None, path
 
 

@@ -37,12 +37,14 @@ from omicsclaw.subagent import (
     load_agents,
 )
 from omicsclaw.tools import ToolRegistry, report_progress
-from omicsclaw.tools.context import report_usage
+from omicsclaw.tools.context import current_context, report_usage
+from omicsclaw.subagent.task_tool import REVIEW_MODULE_KEY
 from omicsclaw.tools.base import Tool
 
 from .config import AppConfig
 from .memory import MEMORY_WRITE_TOOL_NAME
 from .project import REVIEW_BRIEF_FILE
+from .review import ReviewArchive
 from .sandbox import SandboxBinding, sandbox_section
 
 __all__ = [
@@ -299,6 +301,10 @@ class ChildRunner:
         of the context isolation: there is no path by which the parent's
         history could reach it.
         """
+        module = current_context().values.get(REVIEW_MODULE_KEY)
+        archive = ReviewArchive(self._config.workspace, module) if isinstance(module, str) else None
+        if archive:
+            prompt = f"Review module {module}.\n\n{prompt}"
         engine = AgentEngine(
             self._provider.bind(model=definition.model)
             if definition.model
@@ -319,7 +325,13 @@ class ChildRunner:
                 await report_usage(event.usage)
             elif event.result is not None:
                 result = event.result
-        return _conclusion(definition.name, result)
+        conclusion = _conclusion(definition.name, result)
+        if archive:
+            if result is None or result.stop_reason is not StopReason.CONVERGED:
+                raise DelegationIncomplete("Only a completed review can be archived for acceptance")
+            path = archive.save(conclusion)
+            return f"Review saved: {path}\n\n{conclusion}"
+        return conclusion
 
     def _child_registry(self, definition: SubAgentDefinition) -> ToolRegistry:
         """The parent's tools the sub-agent may use, with their policies.

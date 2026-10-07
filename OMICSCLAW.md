@@ -140,8 +140,10 @@ A step is **stale** when its file changed, or a file it read changed, since its 
 
 1. `replay` the module. Done when every step, the validate step included, reports `ok`.
 2. Write `results/<NN_slug>/M<NN>_<slug>_REPORT.md`: what was done, the key numbers with the tables they come from, the figures, and the disclaimer.
-3. Delegate "Review module <NN_slug>" to the `module-reviewer` sub-agent and save its reply unchanged to `results/<NN_slug>/reviews/<YYYY-MM-DD>_review.md`. The first line must be exactly `VERDICT: APPROVE` or `VERDICT: REVISE`; if it is not, ask the reviewer to resend its verdict first instead of editing its reply. On `VERDICT: REVISE`, fix the findings and go back to step 1. Skip the review only when the user asks you to.
+3. Call `task` with `subagent_type="module-reviewer"`, `review_module="<NN_slug>"` and a prompt naming the module. The framework saves the review unchanged and returns its path under `results/<NN_slug>/reviews/task-review-*.md`, with a JSON receipt binding the text and reviewed files to this replay. Use that path directly. If saving fails or the verdict is malformed, request a fresh review. On `VERDICT: REVISE`, fix the findings and go back to step 1. Skip the review only when the user asks you to.
 4. Show the user the report and the verdict. When the user says the module is accepted, run `accept analysis/<NN_slug> --review <review file>`, or `--skip-review "<the user's words>"` when they asked to skip the review.
+
+`accept` checks the receipt for framework-saved reviews. Editing the review, README, report or brief, or changing its replay, requires a fresh review. Manually written reviews remain supported without receipts; use them for a human review, not a copy of a delegated reply. Receipts are checksums in the workspace, not signed attestations.
 
 To change an accepted module, tell the user first, then run `revise`; it keeps the accepted results in `results/<NN_slug>/baseline/`. To set a superseded module aside, ask the user, then pack `analysis/<NN_slug>/` and `results/<NN_slug>/` into one `tar.gz` under `results/_archive/`.
 

@@ -33,6 +33,7 @@ it; everything else in this module runs on the standard library.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -49,6 +50,7 @@ from omicsclaw.schema import (
 )
 
 from ._accumulator import ToolCallAccumulators
+from ._deadline import RequestDeadline
 from ._model_limits import bare_model_name
 from .base import Completion, ProviderError
 from .config import ProviderConfig
@@ -586,7 +588,7 @@ def _build_async_client(config: ProviderConfig) -> Any:
     return sdk.AsyncAnthropic(**kwargs)
 
 
-async def _close_stream(stream: Any) -> None:
+async def _close_stream(stream: Any, timeout: float = 1.0) -> None:
     """Release the SDK stream, tolerating a client that has no ``close``.
 
     Failures are swallowed on purpose: this runs from a ``finally``, and
@@ -599,7 +601,8 @@ async def _close_stream(stream: Any) -> None:
     try:
         result = closer()
         if inspect.isawaitable(result):
-            await result
+            async with asyncio.timeout(min(timeout, 1.0)):
+                await result
     except Exception:
         # Deliberately broad and deliberately silent; see the docstring.
         pass
@@ -721,7 +724,8 @@ class AnthropicProvider:
         """Run one blocking turn. See ``base.LLMProvider.generate``."""
         params = self._request_params(messages, tools)
         try:
-            response = await self._client().messages.create(**params)
+            async with RequestDeadline(self._config.timeout_seconds, self.name).wait():
+                response = await self._client().messages.create(**params)
         except Exception as exc:
             raise self._wrap(exc) from exc
 
@@ -748,8 +752,10 @@ class AnthropicProvider:
         return self._stream(self._request_params(messages, tools))
 
     async def _stream(self, params: dict[str, Any]) -> AsyncIterator[StreamChunk]:
+        deadline = RequestDeadline(self._config.timeout_seconds, self.name)
         try:
-            stream = await self._client().messages.create(**params, stream=True)
+            async with deadline.wait():
+                stream = await self._client().messages.create(**params, stream=True)
         except Exception as exc:
             raise self._wrap(exc) from exc
 
@@ -760,7 +766,7 @@ class AnthropicProvider:
         finish_reason = ""
 
         try:
-            async for event in stream:
+            async for event in deadline.iterate(stream):
                 kind = _field(event, "type", "")
 
                 if kind == "content_block_delta":
@@ -824,7 +830,7 @@ class AnthropicProvider:
             # Trap 9. A consumer that stops early — a cancelled turn, a
             # `break`, a timeout — must not leave the HTTP connection
             # held open for the lifetime of the process.
-            await _close_stream(stream)
+            await _close_stream(stream, self._config.timeout_seconds)
 
 
 __all__ = [

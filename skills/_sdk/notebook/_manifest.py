@@ -232,6 +232,9 @@ def archive_reviews(module: Module, tag: str) -> list[dict]:
         sha = _hashing.sha256_file(path)
         target = folder / path.name
         os.replace(path, target)
+        receipt = path.with_suffix(".json")
+        if path.name.startswith("task-review-") and receipt.is_file():
+            os.replace(receipt, target.with_suffix(".json"))
         entries.append({
             "file": target.relative_to(module.results_dir).as_posix(),
             "original": path.relative_to(module.results_dir).as_posix(),

@@ -67,6 +67,10 @@ class ProviderError(RuntimeError):
         return f"[{self.provider}] {text}" if self.provider else text
 
 
+class ProviderDeadlineExceeded(ProviderError):
+    """The configured request budget is exhausted; do not retry it."""
+
+
 @dataclass(frozen=True, slots=True)
 class Completion:
     """The result of one non-streaming model call.
@@ -166,4 +170,4 @@ class LLMProvider(Protocol):
         ...
 
 
-__all__ = ["Completion", "LLMProvider", "ProviderError"]
+__all__ = ["Completion", "LLMProvider", "ProviderDeadlineExceeded", "ProviderError"]

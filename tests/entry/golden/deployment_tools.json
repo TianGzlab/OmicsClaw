@@ -297,6 +297,10 @@
     "description": {
      "type": "string",
      "description": "A 3-5 word title, shown to the user."
+    },
+    "review_module": {
+     "type": "string",
+     "description": "For the built-in module-reviewer: NN_slug to review. Archives the exact reply and returns its path for accept."
     }
    },
    "required": [

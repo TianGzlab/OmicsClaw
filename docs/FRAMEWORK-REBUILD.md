@@ -3,6 +3,33 @@
 A living status document for the staged rebuild of OmicsClaw's agent
 framework. Read this first if you are picking the work up mid-stream.
 
+## Runtime reliability follow-up (2026-10-07)
+
+OpenAI-compatible and Anthropic requests enforce `timeout_seconds` across
+SDK retries, first response and streaming. `ProviderDeadlineExceeded` ends
+the request without an engine retry. Stream cleanup has a separate allowance
+of at most one second (or the request timeout if shorter). Cancellation still
+propagates. This is an async IO deadline; it cannot interrupt synchronous
+code that blocks the event loop. Failed or cancelled exchanges retain the
+existing session-history behavior: their partial conversation is discarded,
+and completed tool side effects are not rolled back. Automatic resume of
+partial exchanges is not implemented by this change.
+
+The built-in `module-reviewer` accepts `task`'s optional `review_module`
+argument (`NN_slug`). The framework compares the replay, step files, README,
+REPORT and review brief before and after the review, then writes the reply
+as UTF-8 without rewriting it. `results/<NN_slug>/reviews/task-review-*.json`
+records these hashes beside the Markdown reply. `accept --review` verifies
+the receipt for this reserved filename prefix; replay archives both files.
+Legacy calls without `review_module` return text only, and manually written
+human reviews keep their existing acceptance rules. Receipts detect stale
+files and accidental edits; they are not signed and do not protect against
+a workspace writer replacing the review and receipt together. They do not
+rehash every scientific output; the runner's existing replay and validation
+checks still apply.
+
+The following dated rebuild account is historical.
+
 **Last updated: 2026-09-20. Steps 1 through 7 are complete; step 6.11
 (`omicsclaw/observability/`, plan 0043) is the most recent addition — the
 span tree, the six instruments and an optional OpenTelemetry exporter,

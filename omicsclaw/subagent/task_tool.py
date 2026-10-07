@@ -17,6 +17,8 @@ from .registry import SubAgentRegistry
 
 __all__ = ["TASK_TOOL_POLICY", "RecursionRefused", "TaskTool"]
 
+REVIEW_MODULE_KEY = "review_module"
+
 TASK_TOOL_POLICY = ToolPolicy(
     risk_level=RiskLevel.HIGH,
     approval_mode=ApprovalMode.AUTO,
@@ -119,6 +121,13 @@ class TaskTool:
                         "type": "string",
                         "description": "A 3-5 word title, shown to the user.",
                     },
+                    "review_module": {
+                        "type": "string",
+                        "description": (
+                            "For the built-in module-reviewer: NN_slug to review. "
+                            "Archives the exact reply and returns its path for accept."
+                        ),
+                    },
                 },
                 "required": ["subagent_type", "prompt"],
                 "additionalProperties": False,
@@ -156,11 +165,18 @@ class TaskTool:
             )
         self._refuse_recursion(definition)
 
+        module = payload.get(REVIEW_MODULE_KEY)
+        if module is not None and (
+            not isinstance(module, str) or not module.strip()
+            or definition.name != "module-reviewer" or definition.source != "builtin"
+        ):
+            raise ToolArgumentError("review_module requires a module name and the built-in module-reviewer")
+
         outer = current_context()
         with use_tool_context(
             approval=outer.approval,
             progress=outer.progress,
-            values={**outer.values, SUBAGENT_VALUE_KEY: definition.name},
+            values={**outer.values, SUBAGENT_VALUE_KEY: definition.name, REVIEW_MODULE_KEY: module},
         ):
             with pause_tool_timeout():
                 return await self._delegate.delegate(definition, prompt)

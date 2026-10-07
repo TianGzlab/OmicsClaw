@@ -25,6 +25,7 @@ somewhere far from the call that caused it.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
@@ -41,6 +42,7 @@ from omicsclaw.schema import (
 )
 
 from ._accumulator import ToolCallAccumulators
+from ._deadline import RequestDeadline
 from .base import Completion, ProviderError
 from .config import ProviderConfig
 
@@ -404,7 +406,7 @@ def _accumulate_tool_call(calls: ToolCallAccumulators, fragment: Any) -> None:
     calls.append_arguments(index, _text(_field(function, "arguments", "")))
 
 
-async def _close_stream(stream: Any) -> None:
+async def _close_stream(stream: Any, timeout: float = 1.0) -> None:
     """Trap 9. Release the HTTP connection whatever ended the turn.
 
     A failure to close is swallowed: the stream is already gone, and
@@ -419,7 +421,8 @@ async def _close_stream(stream: Any) -> None:
     try:
         result = close()
         if inspect.isawaitable(result):
-            await result
+            async with asyncio.timeout(min(timeout, 1.0)):
+                await result
     except Exception:
         pass
 
@@ -494,6 +497,8 @@ class OpenAIProvider:
         that is how a retry policy tells a 429 from a malformed request
         without importing ``openai`` to inspect the class.
         """
+        if isinstance(exc, ProviderError):
+            return exc
         status = getattr(exc, "status_code", None)
         return ProviderError(
             f"{what}: {type(exc).__name__}: {exc}",
@@ -550,7 +555,8 @@ class OpenAIProvider:
         payload = self._request_payload(messages, tools, stream=False)
         client = self._client_or_create()
         try:
-            response = await client.chat.completions.create(**payload)
+            async with RequestDeadline(self._config.timeout_seconds, self.name).wait():
+                response = await client.chat.completions.create(**payload)
         except Exception as exc:
             raise self._wrap(exc, "chat completion failed") from exc
 
@@ -581,8 +587,10 @@ class OpenAIProvider:
     ) -> AsyncIterator[StreamChunk]:
         payload = self._request_payload(messages, tools, stream=True)
         client = self._client_or_create()
+        deadline = RequestDeadline(self._config.timeout_seconds, self.name)
         try:
-            stream = await client.chat.completions.create(stream=True, **payload)
+            async with deadline.wait():
+                stream = await client.chat.completions.create(stream=True, **payload)
         except Exception as exc:
             raise self._wrap(exc, "streaming chat completion failed") from exc
 
@@ -592,7 +600,7 @@ class OpenAIProvider:
         usage = Usage()
         finish_reason = ""
         try:
-            async for raw in stream:
+            async for raw in deadline.iterate(stream):
                 # Trap 4, the other half: the usage-bearing chunk has an
                 # EMPTY choices array. Reading usage after the skip below
                 # loses all token accounting for every streamed turn.
@@ -633,7 +641,7 @@ class OpenAIProvider:
             # Trap 9. Reached by a normal end, by an error, and by the
             # GeneratorExit that a cancelled turn throws in at the yield
             # above — the case that otherwise leaks the connection.
-            await _close_stream(stream)
+            await _close_stream(stream, self._config.timeout_seconds)
 
         yield StreamChunk.done(
             Message.assistant(
