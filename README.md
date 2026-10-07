@@ -20,7 +20,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
-[![Desktop App](https://img.shields.io/github/v/tag/TianGzlab/OmicsClaw?sort=semver&filter=v*&label=desktop%20app&color=blue&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
+[![Desktop App](https://img.shields.io/github/v/release/TianGzlab/OmicsClaw?label=desktop%20app&color=blue&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
 [![Installer Downloads](https://img.shields.io/github/downloads/TianGzlab/OmicsClaw/total?label=installer%20downloads&color=brightgreen&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
 
@@ -37,7 +37,7 @@ terminal, in the desktop app and on chat platforms.
 - Across seven domains, 83 skills expose function libraries and replayable examples; five remain CLI-only, including the demo-only XCMS stub, and Python/R modules support IO tracking and review before acceptance ([0074](docs/plans/0074-singlecell-skill-migration.md), [0075](docs/plans/0075-spatial-skill-migration.md), [0076](docs/plans/0076-remaining-modalities-migration.md)).
 - A real-model routing eval (`tests/evals/live/`, run by hand) measures whether the model picks the right skill for 26 seed requests, the CI unit-test job now also runs the launch shell, attachments, top-level and desktop HTTP tests, and the four consensus skills whose scripts could not start have since been deleted ([0068](docs/plans/0068-eval-hardening.md), [0070](docs/plans/0070-notebook-skill-runtime.md)).
 - The agent framework has been rebuilt around three entry points, `oc cli`, `oc desktop` and `oc channel`, and the old `oc interactive`, `oc tui`, `oc onboard` and `oc run` commands are gone ([rebuild status](docs/FRAMEWORK-REBUILD.md)).
-- The Desktop App works with the rebuilt backend, including remote mode over SSH and setting up a model from the App ([0064](docs/plans/0064-desktop-app-alignment.md), [0065](docs/plans/0065-desktop-management-pages-and-retirement.md), [0066](docs/plans/0066-desktop-remote-mode.md)).
+- [Desktop v0.1.8](https://github.com/TianGzlab/OmicsClaw/releases/tag/v0.1.8) is available for macOS, Windows and Linux, with Desktop v3, SSH session recovery and an optional Independent review button below each completed reply.
 - The agent tells you which of a skill's packages your environment lacks, and with `OMICSCLAW_SKILL_ENV=install` it can install them after you approve, into a separate overlay that leaves the base environment untouched ([0061](docs/plans/0061-adaptive-env-provisioning.md)).
 
 Earlier entries are in [CHANGELOG.md](CHANGELOG.md).
@@ -100,27 +100,29 @@ network access by setting `OMICSCLAW_SANDBOX=docker` and
   <img src="docs/images/omicsclaw-app-overview.png" alt="The OmicsClaw desktop app, with a project's conversations in the sidebar and the chat box in the middle" width="94%"/>
 </p>
 
-Installers are on the [Releases](https://github.com/TianGzlab/OmicsClaw/releases/latest)
-page. Check each download against the
-[`SHA256SUMS.txt`](https://github.com/TianGzlab/OmicsClaw/releases/latest/download/SHA256SUMS.txt)
+Download [Desktop v0.1.8](https://github.com/TianGzlab/OmicsClaw/releases/tag/v0.1.8) for your platform below.
+Check each download against the
+[`SHA256SUMS.txt`](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/SHA256SUMS.txt)
 published with it.
 
 | Platform | Installer |
 |---|---|
-| macOS, Apple Silicon | `OmicsClaw-<ver>-arm64.dmg` |
-| macOS, Intel | `OmicsClaw-<ver>-x64.dmg` |
-| Windows, x64 or ARM64 | `OmicsClaw.Setup.<ver>-x64.exe`, `OmicsClaw.Setup.<ver>-arm64.exe` |
-| Linux, x64 | `.AppImage`, `.deb`, `.rpm` |
-| Linux, ARM64 | `.AppImage` |
+| macOS, Apple Silicon | [OmicsClaw-0.1.8-arm64.dmg](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-arm64.dmg) |
+| macOS, Intel | [OmicsClaw-0.1.8-x64.dmg](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-x64.dmg) |
+| Windows, x64 or ARM64 | [OmicsClaw.Setup.0.1.8-x64.exe](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw.Setup.0.1.8-x64.exe), [OmicsClaw.Setup.0.1.8-arm64.exe](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw.Setup.0.1.8-arm64.exe) |
+| Linux, x64 | [AppImage](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-x86_64.AppImage), [deb](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-amd64.deb), [rpm](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-x86_64.rpm) |
+| Linux, ARM64 | [AppImage](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-arm64.AppImage) |
 
-The installer contains no Python. The App asks for an interpreter that has
-OmicsClaw installed, normally the conda environment from the quick start:
+The installer contains no Python. **Remote mode** connects to a server through
+SSH or a backend URL and needs no Python on the client. **Local mode** asks for
+an interpreter with OmicsClaw installed, normally the conda environment from
+the quick start:
 
 ```bash
 conda run -n OmicsClaw python -c "import sys; print(sys.executable)"
 ```
 
-The App then starts `oc desktop` for the project you open, one backend per
+In Local mode, the App starts `oc desktop` for the project you open, one backend per
 project. The model comes from the backend's `.env`, which the App's Providers
 page can edit; a change takes effect when the backend restarts. Troubleshooting
 is in the [App guide](docs/ecosystem/omicsclaw-app.mdx), and the HTTP contract
@@ -129,8 +131,9 @@ in [`docs/core-features/surfaces.md`](docs/core-features/surfaces.md) §8.
 Independent module review is off by default. After a reply finishes, click
 **Independent review** below it to review that reply's analysis and return
 the findings in the same conversation. The click applies only to that review;
-it does not enable reviews for later analyses. Update both the App and backend
-to use this control.
+it does not enable reviews for later analyses. Use App v0.1.8 or later, update
+the backend to include [`1540fca7`](https://github.com/TianGzlab/OmicsClaw/commit/1540fca71bc3dbf9ba83557aafe964860a6b81dc),
+and restart `oc desktop` to use this control.
 
 ## Installation
 

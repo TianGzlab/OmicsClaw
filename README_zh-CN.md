@@ -20,7 +20,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
-[![Desktop App](https://img.shields.io/github/v/tag/TianGzlab/OmicsClaw?sort=semver&filter=v*&label=desktop%20app&color=blue&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
+[![Desktop App](https://img.shields.io/github/v/release/TianGzlab/OmicsClaw?label=desktop%20app&color=blue&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
 [![Installer Downloads](https://img.shields.io/github/downloads/TianGzlab/OmicsClaw/total?label=installer%20downloads&color=brightgreen&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
 
@@ -34,7 +34,7 @@ skill，读它的说明，再在你自己的环境里（本机或服务器）运
 
 - 27 个计算型单细胞 skill 均有函数库，3 个原始输入处理 skill 保留 CLI，课题模块可混合 Python 和 R 步骤，记录读写并经过重放、审查和用户确认后验收（[0074](docs/plans/0074-singlecell-skill-migration.md)）。
 - agent 框架已经重写，入口改为 `oc cli`、`oc desktop` 和 `oc channel` 三个，`oc interactive`、`oc tui`、`oc onboard`、`oc run` 等旧命令已移除（[重写进展](docs/FRAMEWORK-REBUILD.md)）。
-- 桌面 App 已能连接重写后的后端，支持经 SSH 的远程模式，也能在 App 里配置模型（[0064](docs/plans/0064-desktop-app-alignment.md)、[0065](docs/plans/0065-desktop-management-pages-and-retirement.md)、[0066](docs/plans/0066-desktop-remote-mode.md)）。
+- [桌面 App v0.1.8](https://github.com/TianGzlab/OmicsClaw/releases/tag/v0.1.8) 已发布 macOS、Windows 和 Linux 安装包，支持 Desktop v3、SSH 会话恢复，以及每条回复完成后的可选“独立审查”按钮。
 - agent 会告诉你当前环境缺哪些 skill 需要的包；设置 `OMICSCLAW_SKILL_ENV=install` 后，它可以在你批准后把这些包装进独立的 overlay 环境，基础环境保持不变（[0061](docs/plans/0061-adaptive-env-provisioning.md)）。
 
 更早的记录见 [CHANGELOG.md](CHANGELOG.md)（英文）。
@@ -89,31 +89,33 @@ agent 在运行 shell 命令、写入或修改文件、访问网络、调用 MCP
   <img src="docs/images/omicsclaw-app-overview.png" alt="OmicsClaw 桌面 App：左侧是项目和对话列表，中间是对话输入框" width="94%"/>
 </p>
 
-安装包在 [Releases](https://github.com/TianGzlab/OmicsClaw/releases/latest) 页面。下载后请用同一页发布的
-[`SHA256SUMS.txt`](https://github.com/TianGzlab/OmicsClaw/releases/latest/download/SHA256SUMS.txt)
+[桌面 App v0.1.8](https://github.com/TianGzlab/OmicsClaw/releases/tag/v0.1.8) 已可下载；请按下表选择平台，并用同一页发布的
+[`SHA256SUMS.txt`](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/SHA256SUMS.txt)
 核对校验和。
 
 | 平台 | 安装包 |
 |---|---|
-| macOS，Apple Silicon | `OmicsClaw-<ver>-arm64.dmg` |
-| macOS，Intel | `OmicsClaw-<ver>-x64.dmg` |
-| Windows，x64 或 ARM64 | `OmicsClaw.Setup.<ver>-x64.exe`、`OmicsClaw.Setup.<ver>-arm64.exe` |
-| Linux，x64 | `.AppImage`、`.deb`、`.rpm` |
-| Linux，ARM64 | `.AppImage` |
+| macOS，Apple Silicon | [OmicsClaw-0.1.8-arm64.dmg](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-arm64.dmg) |
+| macOS，Intel | [OmicsClaw-0.1.8-x64.dmg](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-x64.dmg) |
+| Windows，x64 或 ARM64 | [OmicsClaw.Setup.0.1.8-x64.exe](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw.Setup.0.1.8-x64.exe)、[OmicsClaw.Setup.0.1.8-arm64.exe](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw.Setup.0.1.8-arm64.exe) |
+| Linux，x64 | [AppImage](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-x86_64.AppImage)、[deb](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-amd64.deb)、[rpm](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-x86_64.rpm) |
+| Linux，ARM64 | [AppImage](https://github.com/TianGzlab/OmicsClaw/releases/download/v0.1.8/OmicsClaw-0.1.8-arm64.AppImage) |
 
-安装包里不带 Python。App 会让你指定一个装好了 OmicsClaw 的解释器，一般就是快速开始里建的
-conda 环境：
+安装包里不带 Python。**Remote 模式**通过 SSH 或后端 URL 连接服务器，客户端本机不需要 Python。
+**Local 模式**需要指定装好了 OmicsClaw 的解释器，一般就是快速开始里建的 conda 环境：
 
 ```bash
 conda run -n OmicsClaw python -c "import sys; print(sys.executable)"
 ```
 
-之后 App 会为你打开的项目启动 `oc desktop`，一个后端对应一个项目。模型配置来自后端的 `.env`，
+Local 模式下，App 会为你打开的项目启动 `oc desktop`，一个后端对应一个项目。模型配置来自后端的 `.env`，
 可以在 App 的 Providers 页面修改，后端重启后生效。排障见 [App 指南](docs/ecosystem/omicsclaw-app.mdx)，
 HTTP 接口约定见 [`docs/core-features/surfaces.md`](docs/core-features/surfaces.md) 第 8 节。
 
 模块独立审查默认关闭。回复完成后，点击下方的“独立审查”即可审查该回复对应的分析，意见会回到当前
-会话。点击只开启这一次审查，后续分析仍默认关闭。使用此功能需同时更新 App 和后端。
+会话。点击只开启这一次审查，后续分析仍默认关闭。使用此功能需安装 App v0.1.8 或更高版本，
+将后端更新到包含 [`1540fca7`](https://github.com/TianGzlab/OmicsClaw/commit/1540fca71bc3dbf9ba83557aafe964860a6b81dc) 的版本，
+并重启 `oc desktop`。
 
 ## 安装
 
