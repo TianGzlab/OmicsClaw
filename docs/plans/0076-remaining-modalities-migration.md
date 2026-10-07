@@ -118,6 +118,58 @@ CONDA_PREFIX=/opt/conda/envs/OmicsClaw OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 
 - 五域按 CI 的路径和 marker 选择：215 passed、45 deselected，327.72 秒，无跳过。
 - 41 个示例执行及 fresh-kernel replay：41 passed、46 deselected，239.24 秒。
 - Scripted eval：29 passed，14.00 秒。
-- 完整单测首次在外部 API 错误路径超时，未作为通过证据。修复 EOF 竞态和 CLI 测试隔离后，需要从最终提交再跑完整单测和远端 CI。
+- 完整单测首次在外部 API 错误路径超时，未作为通过证据。随后修复 EOF 竞态和 CLI 测试隔离，从最终代码提交重新验收，结果见下节。
 
 Python 3.11.15；NumPy 2.0.2、pandas 2.3.3、AnnData 0.12.11、SciPy 1.17.1、scikit-learn 1.9.1、nbclient 0.11.0、gseapy 1.2.1。完整环境快照和命令输出保留在 `/tmp/omicsclaw-ci-acceptance.NPluim/`，远端的独立安装及测试记录见上述 Actions 链接。
+
+### 补验收独立审核
+
+用户确认以 `8d8ad9ef` 为基线，两个未参与修复的子 agent 分别审核 Standards 和 Spec，覆盖 `6df935ca`、`d8204f91`。
+
+- Standards：硬违规 0、代码异味建议 0。独立运行 deadline、CLI/configuration、phasing API 共 65 项，全部通过；确认精确 ignore 例外、取消传播和空表校验边界。
+- Spec：发现 0。独立运行 deadline、CLI/configuration、phasing API 和 10 个基因组 CLI 共 75 项，全部通过；另跑全基因组 API 和原 phasing CLI 契约 21 项，两个集合有重叠。把旧 EOF 迭代逻辑临时恢复到测试进程后，两条新 session 回归均失败，当前实现均通过。
+
+两位审核者均确认此次 diff 不包含演示文稿或其他会话的 Desktop 改动，没有新增 skip、xfail 或削弱结果断言。审核不代替远端 CI 和最终 checkout 的完整回归。
+
+### 最终代码的远端验收
+
+`d8204f91` 的 [Eval CI #37618053119](https://github.com/zhou-1314/OmicsClaw/actions/runs/37618053119) 已完成，结论为 success。以下六个 job 全部成功，没有 job 被跳过：
+
+- Unit tests：7,175 passed、64 skipped、154 deselected、5 xfailed、1 xpassed，341.71 秒。skip/xfail 沿用已有环境条件和已知失败清单，本次未增加。
+- Skill examples (gate)。
+- Spatial APIs and replay (CPU)。
+- Remaining modalities (API and replay gate)：215 passed、45 deselected，308.62 秒；41 个示例及 fresh replay 全部通过、46 deselected，225.60 秒。
+- Skill examples (extended CPU)。
+- Scripted eval suite (gate)。
+
+这轮由 main push 自动触发，远端从该提交重新 checkout 并安装依赖。不是重跑旧提交，也不是只重跑失败用例。
+
+### 最终代码的干净 checkout 验收
+
+再次从 `d8204f91` 创建 `/tmp/omicsclaw-ci-acceptance.NPluim/verify-final`，新 venv 的 editable 安装同步指向该目录，并重新核对两个包的实际导入路径。`pip check` 无冲突，完整测试前后 `git status --porcelain --untracked-files=all` 均为空。
+
+| 检查 | 结果 | 耗时 |
+|---|---|---|
+| CI unit-job 的全部目录和 marker 选择 | 7,206 passed、33 skipped、154 deselected、6 xfailed | 354.17 秒 |
+| 五域公开 API 与 CLI | 215 passed、45 deselected | 331.38 秒 |
+| 剩余模态示例执行与 fresh-kernel replay | 41 passed、46 deselected | 238.63 秒 |
+| Scripted eval | 29 passed | 13.89 秒 |
+
+单测必须先激活 venv，使子 shell 的 `python` 与测试解释器一致；conda 命令用于 SDK 子环境及安装脚本测试。仅用绝对路径启动 Python 的中间运行有 10 项因 PATH 缺 `python`/`conda` 失败，未计作验收通过。补齐 PATH 后相关测试 76 passed、4 skipped，再重跑完整单测得到上表结果。没有为此修改业务代码或增加跳过条件。
+
+```bash
+source /tmp/omicsclaw-ci-acceptance.NPluim/venv/bin/activate
+export PATH="/opt/conda/condabin:$PATH"
+cd /tmp/omicsclaw-ci-acceptance.NPluim/verify-final
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
+python -m pytest \
+  tests/engine tests/entry tests/provider tests/tools tests/context \
+  tests/permission tests/hooks tests/memory tests/planning \
+  tests/observability tests/schema tests/skills tests/subagent \
+  tests/sandbox tests/skillenv tests/mcp tests/sdk tests/evals \
+  tests/launch tests/attachments tests/test_*.py \
+  -m 'not slow and not demo and not eval and not scripted_eval and not skill_example' \
+  -p no:cacheprovider
+```
+
+最终日志分别为 `unit-activated.log`、`remaining-final.log`、`examples-final.log`、`eval-final.log`，均在 `/tmp/omicsclaw-ci-acceptance.NPluim/`。skip 和 xfail 均沿用已有条件；本机与远端计数不同，未将它们合并为一个通过数。验收覆盖上述代码提交，后续交付记录只改 Markdown。
