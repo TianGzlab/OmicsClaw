@@ -62,20 +62,23 @@ def analyse_crosslinks(df: pd.DataFrame, fdr_threshold: float = 0.05,
         distances = df_filtered["distance_angstrom"]
         n_satisfied = int((distances <= max_distance).sum())
         n_violated = int((distances > max_distance).sum())
-        satisfaction_rate = round(n_satisfied / len(df_filtered) * 100, 1) if len(df_filtered) > 0 else 0
+        n_checked = int(distances.notna().sum())
+        satisfaction_rate = round(n_satisfied / n_checked * 100, 1) if n_checked else None
 
-        df_filtered["constraint_satisfied"] = distances <= max_distance
+        df_filtered["constraint_satisfied"] = (distances <= max_distance).astype('boolean').mask(distances.isna())
 
         dist_stats = {
             "mean_distance": round(float(distances.mean()), 2),
             "median_distance": round(float(distances.median()), 2),
             "min_distance": round(float(distances.min()), 2),
             "max_distance_observed": round(float(distances.max()), 2),
+        } if n_checked else {
+            key: None for key in ('mean_distance', 'median_distance', 'min_distance', 'max_distance_observed')
         }
     else:
-        n_satisfied = n_passed_fdr
-        n_violated = 0
-        satisfaction_rate = 100.0
+        n_satisfied = None
+        n_violated = None
+        satisfaction_rate = None
         dist_stats = {}
 
     # Unique protein pairs

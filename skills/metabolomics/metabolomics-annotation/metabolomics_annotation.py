@@ -118,6 +118,7 @@ def main():
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--reference-file", help="CSV with name, neutral_mass, database_id, formula; required for real input")
     parser.add_argument("--database", default="hmdb", choices=list(SUPPORTED_DATABASES))
     parser.add_argument("--ppm", type=float, default=10.0)
     parser.add_argument(
@@ -127,6 +128,11 @@ def main():
         help="Adduct types to consider (default: [M+H]+ [M-H]-)",
     )
     args = parser.parse_args()
+
+    if not args.demo and not args.reference_file:
+        parser.error('--reference-file is required with real input; demo metabolites are not a reference database')
+    library = load_skill("metabolomics-annotation")
+    reference = pd.read_csv(args.reference_file) if args.reference_file else library.demo_reference()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -142,10 +148,9 @@ def main():
 
     logger.info("Input: %d features", len(peaks))
 
-    library = load_skill("metabolomics-annotation")
-    annotations = library.annotate(peaks, database=args.database, ppm=args.ppm, adducts=args.adducts)
+    annotations = library.annotate(peaks, database=args.database, ppm=args.ppm, adducts=args.adducts, reference=reference)
 
-    library.run_info(annotations, keep=False)
+    info = library.run_info(annotations, keep=False)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
@@ -172,9 +177,11 @@ def main():
         "ppm": args.ppm,
         "adducts": ", ".join(args.adducts),
     }
+    if args.reference_file:
+        params['reference_file'] = args.reference_file
 
     write_report(output_dir, summary, input_file, params)
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params})
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params, "run_info": info})
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

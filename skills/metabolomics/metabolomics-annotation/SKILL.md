@@ -1,7 +1,8 @@
 ---
 name: metabolomics-annotation
-description: Load when annotating LC-MS features against a built-in 15-metabolite HMDB demo dictionary
-  by m/z within a `--ppm` tolerance — emits a per-feature annotation table. Skip when needing spectral matching or online database searches (use external SIRIUS / GNPS).
+description: Load when matching LC-MS m/z features to an explicit local metabolite reference within a ppm
+  tolerance; bundled HMDB entries are for explicit demonstrations only. Skip pathway ORA (use
+  metabolomics-pathway-enrichment) and spectral matching or online searches (use external SIRIUS / GNPS).
 trigger: metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching, metabolite ID, ppm tolerance
 tags:
 - metabolomics
@@ -24,7 +25,8 @@ import pandas as pd
 from skills._sdk.notebook import load_skill, read_input, write_output
 library = load_skill("metabolomics-annotation")
 data = read_input('features.csv', reader=pd.read_csv)
-result = library.annotate(data)
+reference = read_input('reference.csv', reader=pd.read_csv)
+result = library.annotate(data, reference=reference)
 write_output(result, 'tables/result.csv')
 ```
 
@@ -42,12 +44,18 @@ return new DataFrames, leave the input unchanged and expose diagnostics through
 Match every observed m/z to all reference adducts within tolerance.
 
 :param data: Feature DataFrame with a numeric mz column.
-:param database: CLI default hmdb; other labels require an explicit reference.
+:param database: CLI default hmdb; label for the supplied reference, not a database fetch.
 :param ppm: CLI default 10; nonnegative mass error tolerance in parts per million.
 :param adducts: CLI default None resolves to [M+H]+ and [M-H]-.
-:param reference: Optional DataFrame with name, neutral_mass, database_id and formula; None uses 15 demo metabolites.
+:param reference: Required DataFrame with name, neutral_mass, database_id and formula; demo_reference() is for demonstrations only.
 :returns: A new annotations DataFrame; attrs['run_info'] names the reference scope.
 :raises ValueError: Reference, observed masses, tolerance or adducts are invalid.
+
+### `demo_reference()`
+
+Return the 15 bundled metabolites for explicit demonstrations.
+
+:returns: An independent reference DataFrame marked as demo in its attrs.
 
 ### `run_info(data, *, keep=True)`
 
@@ -70,11 +78,12 @@ Plot the ppm error of matched metabolite candidates.
 
 ## Methods and parameters
 
-The default hmdb lookup is a 15-entry demo. Pass reference= with name, neutral_mass, database_id and formula for local real-reference mass matching. No network lookup runs. The CLI has no reference-file flag.
+Pass `reference=` with name, neutral_mass, database_id and formula for local reference mass matching. The CLI requires `--reference-file reference.csv` for real input. No network lookup runs; `database` labels the supplied reference. `demo_reference()` explicitly selects 15 illustrative HMDB entries, also used by `--demo`.
 
 ## Gotchas
 
-- `annotate` rejects other database labels without reference data. Each query can have multiple candidate rows in `tables/annotations.csv`; Unknown rows retain unmatched queries. Confidence labels describe ppm bins, not identification probability.
+- `annotate` rejects missing reference data; demo references cannot be relabelled as another database. Each query can have multiple candidate rows in `tables/annotations.csv`; Unknown rows retain unmatched queries. Confidence labels describe ppm bins, not identification probability.
+- `result.json` preserves the reference scope in `data.run_info.reference_scope`; demo matches are not biological identification evidence.
 
 ## Inputs and outputs
 
@@ -85,6 +94,7 @@ The function library returns objects; the CLI and step own file writes.
 
 ```bash
 python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py --demo --output /tmp/metabolomics_annotation
+python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py --input features.csv --reference-file reference.csv --output /tmp/metabolomics_annotation_real
 ```
 
 ## See also

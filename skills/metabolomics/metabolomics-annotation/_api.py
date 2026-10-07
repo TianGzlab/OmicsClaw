@@ -1,23 +1,37 @@
 """In-memory metabolite annotation by adduct mass tolerance."""
 import numpy as np
-from skills.metabolomics._lib.annotation import annotate_mz, ADDUCT_RULES
+import pandas as pd
+from skills.metabolomics._lib.annotation import annotate_mz, ADDUCT_RULES, DEMO_METABOLITES
 
-__all__ = ['annotate', 'run_info', 'mass_error_figure']
+__all__ = ['annotate', 'demo_reference', 'run_info', 'mass_error_figure']
+
+
+def demo_reference():
+    """Return the 15 bundled metabolites for explicit demonstrations.
+
+    :returns: An independent reference DataFrame marked as demo in its attrs.
+    """
+    reference = pd.DataFrame(DEMO_METABOLITES, columns=['name', 'neutral_mass', 'database_id', 'formula'])
+    reference.attrs['reference_scope'] = 'demo'
+    return reference
 
 
 def annotate(data, *, database='hmdb', ppm=10., adducts=None, reference=None):
     """Match every observed m/z to all reference adducts within tolerance.
 
     :param data: Feature DataFrame with a numeric mz column.
-    :param database: CLI default hmdb; other labels require an explicit reference.
+    :param database: CLI default hmdb; label for the supplied reference, not a database fetch.
     :param ppm: CLI default 10; nonnegative mass error tolerance in parts per million.
     :param adducts: CLI default None resolves to [M+H]+ and [M-H]-.
-    :param reference: Optional DataFrame with name, neutral_mass, database_id and formula; None uses 15 demo metabolites.
+    :param reference: Required DataFrame with name, neutral_mass, database_id and formula; demo_reference() is for demonstrations only.
     :returns: A new annotations DataFrame; attrs['run_info'] names the reference scope.
     :raises ValueError: Reference, observed masses, tolerance or adducts are invalid.
     """
-    if reference is None and database != 'hmdb':
-        raise ValueError('A non-HMDB database requires an explicit reference; only the HMDB demo is bundled')
+    if reference is None:
+        raise ValueError('An explicit reference is required; demo_reference() is only for demonstrations')
+    scope = reference.attrs.get('reference_scope', 'provided')
+    if scope == 'demo' and database != 'hmdb':
+        raise ValueError('The demo reference contains HMDB labels; supply a reference for another database')
     if not np.isfinite(ppm) or ppm < 0:
         raise ValueError('ppm must be finite and nonnegative')
     if 'mz' not in data or not len(data) or not np.isfinite(data['mz']).all() or (data['mz'] <= 0).any():
@@ -35,7 +49,7 @@ def annotate(data, *, database='hmdb', ppm=10., adducts=None, reference=None):
             raise ValueError('reference adduct masses must be positive and finite')
         rows = list(reference[required].itertuples(index=False, name=None))
     result = annotate_mz(data['mz'], database=database, ppm=ppm, adducts=chosen, reference=rows)
-    result.attrs['run_info'] = {'database': database, 'reference_scope': 'demo' if reference is None else 'provided',
+    result.attrs['run_info'] = {'database': database, 'reference_scope': scope,
                               'n_queries': data['mz'].nunique(), 'ppm': ppm, 'adducts': chosen}
     return result
 

@@ -1,8 +1,17 @@
 """Metabolite over-representation analysis with explicit reference scope."""
 import numpy as np
+from copy import deepcopy
 from skills.metabolomics._lib.pathways import pathway_enrichment, DEMO_METABOLIC_PATHWAYS
 
-__all__ = ['enrich', 'run_info', 'enrichment_figure']
+__all__ = ['enrich', 'demo_pathways', 'run_info', 'enrichment_figure']
+
+
+def demo_pathways():
+    """Return an independent copy of the nine illustrative pathway sets.
+
+    :returns: A mapping for explicit demo use, not a complete pathway database.
+    """
+    return deepcopy(DEMO_METABOLIC_PATHWAYS)
 
 
 def enrich(data, *, method='ora', pathways=None):
@@ -10,20 +19,22 @@ def enrich(data, *, method='ora', pathways=None):
 
     :param data: Iterable of metabolite names; duplicates count once in each overlap.
     :param method: CLI default ora, the only implemented method.
-    :param pathways: Mapping of pathway names to metabolites lists and kegg_id labels; None uses nine demo pathways.
+    :param pathways: Required mapping of pathway names to metabolites lists and kegg_id labels; use demo_pathways() only for demonstrations.
     :returns: A new table; BH FDR covers pathways with at least one hit, matching the CLI.
     :raises ValueError: A requested method is unimplemented or reference is empty.
     """
     if method != 'ora':
         raise ValueError('Only ora is implemented; mummichog and fella require external tools')
-    reference = DEMO_METABOLIC_PATHWAYS if pathways is None else pathways
+    if pathways is None:
+        raise ValueError('An explicit reference is required in pathways; demo_pathways() is only for demonstrations')
+    reference = pathways
     if not reference or any(not entry.get('metabolites') or 'kegg_id' not in entry for entry in reference.values()):
         raise ValueError('pathways require nonempty metabolites and kegg_id labels')
     values = list(data)
     result = pathway_enrichment(values, method=method, pathways=reference)
     result.attrs['run_info'] = {'method': method, 'n_metabolites': len(values), 'n_pathways_tested': len(reference),
                               'n_significant': int((result['fdr'] < .05).sum()),
-                              'reference_scope': 'demo' if pathways is None else 'provided',
+                              'reference_scope': 'demo' if reference == DEMO_METABOLIC_PATHWAYS else 'provided',
                               'fdr_family': 'pathways_with_overlap'}
     return result
 

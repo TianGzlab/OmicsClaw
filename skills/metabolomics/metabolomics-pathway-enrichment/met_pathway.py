@@ -6,13 +6,14 @@ Analysis) for statistically sound pathway enrichment, with
 Benjamini-Hochberg FDR correction.
 
 Usage:
-    python met_pathway.py --input <features.csv> --output <dir>
+    python met_pathway.py --input <features.csv> --pathway-file <pathways.json> --output <dir>
     python met_pathway.py --demo --output <dir>
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -40,12 +41,6 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "met-pathway"
 SKILL_VERSION = "0.5.0"
 
-
-# ---------------------------------------------------------------------------
-# Demo metabolic pathway database (KEGG-like)
-# IDs verified against KEGG (https://www.kegg.jp/kegg/pathway.html)
-# ---------------------------------------------------------------------------
-from skills.metabolomics._lib.pathways import DEMO_METABOLIC_PATHWAYS
 
 # ---------------------------------------------------------------------------
 # Demo data
@@ -128,8 +123,14 @@ def main():
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--pathway-file", help="JSON mapping of pathway names to metabolites and kegg_id; required for real input")
     parser.add_argument("--method", default="ora", choices=["ora", "mummichog", "fella"])
     args = parser.parse_args()
+
+    if not args.demo and not args.pathway_file:
+        parser.error('--pathway-file is required with real input; demo pathways are not a reference database')
+    library = load_skill("metabolomics-pathway-enrichment")
+    pathways = json.loads(Path(args.pathway_file).read_text()) if args.pathway_file else library.demo_pathways()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -145,10 +146,9 @@ def main():
     met_col = "metabolite" if "metabolite" in df.columns else df.columns[0]
     metabolite_list = df[met_col].tolist()
 
-    library = load_skill("metabolomics-pathway-enrichment")
-    result_df = library.enrich(metabolite_list, method=args.method)
+    result_df = library.enrich(metabolite_list, method=args.method, pathways=pathways)
 
-    library.run_info(result_df, keep=False)
+    info = library.run_info(result_df, keep=False)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
@@ -158,14 +158,14 @@ def main():
 
     summary = {
         "n_metabolites": len(metabolite_list),
-        "n_pathways_tested": len(DEMO_METABOLIC_PATHWAYS),
+        "n_pathways_tested": info['n_pathways_tested'],
         "n_significant": n_sig,
         "method": args.method,
     }
-    params = {"method": args.method}
+    params = {"method": args.method, "pathway_file": args.pathway_file, "reference_scope": info['reference_scope']}
 
     write_report(output_dir, summary, args.input_path if not args.demo else None, params, result_df)
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params})
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params, "run_info": info})
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

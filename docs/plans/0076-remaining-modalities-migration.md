@@ -6,7 +6,7 @@
 
 | 批次 | 数量 | 交付要求 | 状态 |
 |---|---:|---|---|
-| bulk RNA-seq | 14 | 14 个函数库，包括已有比对结果的读取和统计 | 整体验证中 |
+| bulk RNA-seq | 14 | 14 个函数库，包括已有比对结果的读取和统计 | 本地验收通过 |
 | genomics | 10 | 10 个函数库，解析已有序列或结果，不冒称运行上游工具 | 域内验收通过 |
 | proteomics | 8 | 8 个表格分析函数库 | 域内验收通过 |
 | metabolomics | 8 | 7 个函数库；XCMS 保留明确的 demo-only CLI | 域内验收通过 |
@@ -26,7 +26,7 @@
 
 ## 交付证据
 
-本轮新增 40 个函数库和 41 个可执行示例。全仓库为 83 个函数库、5 个 CLI-only 技能，索引共 88 个、0 skipped。整体验证及独立审核未结束，暂不标记为已交付。
+本轮新增 40 个函数库和 41 个可执行示例。全仓库为 83 个函数库、5 个 CLI-only 技能，索引共 88 个、0 skipped。实现、独立审核修复及最终整合回归均已完成。
 
 ### 兼容性与边界
 
@@ -45,14 +45,57 @@
 
 基础 conda 环境未修改。Python 科学测试使用 `/opt/conda/envs/OmicsClaw/bin/python`；示例使用独立 venv `/tmp/omicsclaw-0075-ci.huDrtZ/venv/bin/python`，R 后端通过显式 `CONDA_PREFIX` 指向已有科学环境。新增 CI job 从 `environment.yml` 的同名 conda 包安装 R/WGCNA/sva/survival/DESeq2，实际远端 CI 尚未运行。
 
+- 审核修复后，全批旧 CLI/API 对比 121 passed、3 skipped，202.24 秒。跳过项是旧 WGCNA 无成功基线对应的 CLI/API 两项，以及 XCMS 无 API 一项。61 个实际基线均核验为 `f97f38c1`、两次确定性录制，没有整个案例仅作结构比较。
+- 最终 41 个新示例全部经 step runner 和 fresh-kernel replay 通过，243.88 秒，核对输出文件、表格哈希及重放状态。
+- 最终 SDK、技能、依赖环境和 parity 工具回归 1,307 passed、6 skipped、101 deselected、2 xpassed，219.23 秒。两项 XPASS 为原有环境相关标记，不是新增失败。
 - 基因组：18 项公开 API、10 项 CLI、24 项旧 CLI/API 对比、10 个 fresh replay 通过。
 - 蛋白组：32 项域测试、28 项旧 CLI/API 对比、8 个 fresh replay 通过。
 - 代谢组：19 个旧 CLI case 与 18 个 API case 逐值通过，XCMS API 不适用；8 个 fresh replay 通过。
 - bulk 主批六技能：16 项旧 CLI/API 对比、27 项目录测试通过；后续补零支持信号、Figure/IO/RNG 和真实 DESeq2 测试，计入最终回归。
 - bulk read 三技能：11 项目录测试、6 项旧 CLI/API 对比、3 个 fresh replay 通过。
 - API 文档、依赖计数和注册契约最终阶段检查 246 项通过；索引重建及检查 8 项通过。
-- 框架首次回归 5,813 passed、16 skipped、3 xfailed，仅两个尚未重建域索引失败；索引已重建。SDK 首次回归的失败来自并行中尚未生成的文档及更新前的依赖计数，最终回归结果待记。
+- 框架最终完整回归 5,815 passed、16 skipped、3 xfailed，165.70 秒。之后两个代谢技能路由描述更新，域索引重新生成并复检 8 项通过。
+- 五域完整目录测试在审核修复前 246 passed，500.04 秒；修复后代谢组、结构蛋白组及 CI 示例选择守卫共 42 passed。修复只影响这两域中的三个技能。当前五域共收集到 258 项，不把收集数当通过数。
+- 文档、索引、依赖注册、依赖计数和示例选择检查最终 256 passed，3.32 秒。CI job 按域而非 `sc-` 名称前缀选择例子，避免把旧 `scatac-preprocessing` 误放进剩余模态依赖环境。
+- 并行实现期间曾出现未生成 API 文档、未更新索引和旧依赖数量断言的失败，均已补齐；保留最终完整回归结果，不把这些中间运行作为交付通过证据。
 
 ### 独立审核
 
-待执行。固定基线 `f97f38c1`；Standards 与 Spec 由未参与实现的两个子 agent 分别审核。需求依据为本计划及用户确认的三个验收入口。另一会话的演示文稿和 CHANGELOG 条目不纳入此次提交。
+固定基线 `f97f38c1`；Standards 与 Spec 由未参与实现的两个子 agent 分别审核。需求依据为本计划及用户确认的三个验收入口。审核覆盖实现提交 `b3cfb738` 及后续工作区修复。
+
+#### Standards
+
+发现 2 项，均已独立复核关闭，无未解决的硬违规。
+
+- P1：代谢通路缺参考时自动使用 demo pathway。API、内部计算和真实 CLI 现均要求显式参考；demo 显式传入示例库并记录来源。同类 annotation 路径、使用示例、参考文档和模型路由描述同步修复。
+- P2：贡献指南未同步范围。`CONTRIBUTING.md` 现与 README、AGENTS 一致，说明 83 个函数库、5 个 CLI-only 技能及验收流程。
+
+审核 agent 独立运行两技能 API/CLI 14 项及两个 step/fresh replay，全部通过。域索引随后由主 agent 生成并复检。未另报代码异味建议。
+
+#### Spec
+
+发现 2 项，均已独立复核关闭，无额外范围扩张问题。
+
+- P1：与 Standards 同一缺参考问题；真实 pathway CLI 现在要求 `--pathway-file`，API 必须显式传入参考，demo 单独选择示例集合。
+- P2：结构蛋白组的部分缺失距离原被标为失败并计入比例分母。现缺测为 NA，比例只计算有效距离；全缺测的计数和统计为标准 JSON null。API 与真实 CLI 回归包含严格 JSON 解析。
+
+审核 agent 独立验证目录分类和 loader，运行 18 项代表性科学及接口测试（含真实 R，无跳过）、7 项结构蛋白组修复测试、7 项通路修复及示例测试，全部通过。
+
+两轴各发现 2 项、各开放 0 项；最严重问题均为已关闭的 P1 缺参考时采用 demo 数据。
+
+### 复现
+
+```bash
+# science_python 使用现有科学环境；ci_python 使用独立 Python venv。
+"$science_python" -m pytest skills/bulkrna skills/genomics skills/proteomics \
+  skills/metabolomics skills/literature --import-mode=importlib -q -o addopts=""
+"$science_python" -m pytest tests/parity/test_sc_parity.py \
+  -k 'bulkrna or genomics or proteomics or metabolomics or literature' -q -o addopts=""
+CONDA_PREFIX=/opt/conda/envs/OmicsClaw OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 "$ci_python" -m pytest \
+  tests/sdk/notebook/test_skill_examples.py -m skill_example_remaining -q -o addopts=""
+"$science_python" -m pytest tests/sdk tests/skills tests/skillenv tests/parity/test_snapshot.py \
+  --import-mode=importlib -m 'not slow and not skill_example' -q -o addopts=""
+```
+
+工作分支为 `feat/remaining-modalities-migration`，本轮尚未合并或推送。远端 CI、实时 MyGene/STRING/DOI/PubMed 和真实 PDF/GEO 下载未作端到端验收。另一会话的演示文稿和 CHANGELOG 条目保留，不纳入此次提交。

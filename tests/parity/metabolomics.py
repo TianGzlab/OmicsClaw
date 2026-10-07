@@ -70,7 +70,8 @@ def api_statistics(case):
 def api_annotation(case):
     from skills._sdk.notebook import load_skill
     from skills.metabolomics._lib.demo import annotation
-    result = load_skill('metabolomics-annotation').annotate(annotation(), ppm=5. if case == 'tight' else 10.)
+    library = load_skill('metabolomics-annotation')
+    result = library.annotate(annotation(), ppm=5. if case == 'tight' else 10., reference=library.demo_reference())
     return {'tables': {'annotations.csv': result}}
 
 
@@ -86,7 +87,7 @@ def api_pathway_enrichment(case):
     from skills._sdk.notebook import load_skill
     from skills.metabolomics._lib.demo import pathway_enrichment
     library = load_skill('metabolomics-pathway-enrichment')
-    result = library.enrich(pathway_enrichment()['metabolite'])
+    result = library.enrich(pathway_enrichment()['metabolite'], pathways=library.demo_pathways())
     info = library.run_info(result)
     return {'tables': {'pathway_enrichment.csv': result},
             'summary': {k: info[k] for k in ('method', 'n_metabolites', 'n_pathways_tested', 'n_significant')}}

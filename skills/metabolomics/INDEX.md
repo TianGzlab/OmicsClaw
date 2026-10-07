@@ -16,13 +16,13 @@ LC-MS metabolomics: XCMS preprocessing, peak detection, metabolite annotation (S
 
 ## Skills
 
-- `metabolomics-annotation` — Load when annotating LC-MS features against a built-in 15-metabolite HMDB demo dictionary by m/z within a `--ppm` tolerance — emits a per-feature annotation table. Skip when needing spectral matching or online database searches (use external SIRIUS / GNPS).
+- `metabolomics-annotation` — Load when matching LC-MS m/z features to an explicit local metabolite reference within a ppm tolerance; bundled HMDB entries are for explicit demonstrations only. Skip pathway ORA (use metabolomics-pathway-enrichment) and spectral matching or online searches (use external SIRIUS / GNPS).
   triggers: metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching, metabolite ID, ppm tolerance
 - `metabolomics-de` — Load when running two-group metabolomics DE (t-test + log2FC + BH-FDR + PCA) on a feature × sample CSV using `--group-a-prefix` / `--group-b-prefix` (default `ctrl` / `treat`). Skip when needing tunable test backends (use metabolomics-statistics); raw spectra.
   triggers: metabolomics differential, PLS-DA, volcano plot, biomarker, OPLS-DA
 - `metabolomics-normalization` — Load when normalising a feature × sample metabolomics CSV via median, quantile, total (sum), PQN (probabilistic quotient), or log methods — emits a normalised wide-form table. Skip when also imputing (use metabolomics-quantification); raw spectra (use metabolomics-xcms-preprocessing).
   triggers: metabolomics normalization, scaling, NOREVA, TIC normalization
-- `metabolomics-pathway-enrichment` — Load when running over-representation analysis (ORA) on a metabolite list via Fisher's exact test against a built-in 9-pathway DEMO dictionary, BH-FDR adjusted. Skip when needing real KEGG / Reactome (this skill is demo-only); `mummichog` / `fella` topology methods (use those external tools).
+- `metabolomics-pathway-enrichment` — Load when running metabolite-name ORA against an explicit local pathway reference with BH-FDR; bundled pathway sets are for explicit demonstrations only. Skip m/z annotation (use metabolomics-annotation) and topology analysis or online pathway retrieval (use external mummichog / FELLA or database tools).
   triggers: metabolomics pathway, KEGG, MetaboAnalyst, enrichment, mummichog
 - `metabolomics-peak-detection` — Load when running per-sample peak picking on a feature × intensity table via `scipy.signal.find_peaks` — emits per-(sample, feature) detected peaks with prominence and width. Skip when working with mz / RT raw scans (use metabolomics-xcms-preprocessing); only normalising / quantifying (use metabolomics-quantification).
   triggers: peak detection, feature detection, XCMS, MZmine, MS-DIAL, peak picking

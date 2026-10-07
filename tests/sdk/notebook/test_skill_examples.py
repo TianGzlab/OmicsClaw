@@ -34,7 +34,9 @@ EXAMPLES = [
     pytest.param(example, marks=pytest.mark.skill_example_spatial, id=example.parent.parent.name)
     if example.parent.parent.name.startswith("spatial-") else
     pytest.param(example, marks=pytest.mark.skill_example_remaining, id=example.parent.parent.name)
-    if not example.parent.parent.name.startswith('sc-') else pytest.param(example, id=example.parent.parent.name)
+    if example.relative_to(REPO / 'skills').parts[0] in {
+        'bulkrna', 'genomics', 'proteomics', 'metabolomics', 'literature'
+    } else pytest.param(example, id=example.parent.parent.name)
     for example in EXAMPLES
 ]
 
@@ -42,6 +44,7 @@ EXAMPLES = [
 @pytest.mark.parametrize("example", EXAMPLES)
 def test_the_example_step_runs(example, tmp_path):
     skill = example.parent.parent.name
+    is_singlecell = example.relative_to(REPO / 'skills').parts[0] == 'singlecell'
     root = tmp_path / "project"
     root.mkdir()
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
@@ -52,7 +55,7 @@ def test_the_example_step_runs(example, tmp_path):
     assert new.returncode == 0, new.stdout + new.stderr
     step = root / "analysis" / "01_demo" / f"01_{skill.replace('-', '_')}.py"
     shutil.copy2(example, step)
-    if not skill.startswith('sc-'):
+    if not is_singlecell:
         (step.parent / "02_validate.py").write_text(
             "# %%\nfrom pathlib import Path\n"
             "from skills._sdk.notebook import read_input\n"
@@ -79,7 +82,7 @@ def test_the_example_step_runs(example, tmp_path):
     else:
         assert calls, f"the example made no recorded call to {skill}"
         assert runs[-1].skill_loads[0]["stub"] is False
-    if not skill.startswith('sc-'):
+    if not is_singlecell:
         outputs = root / "results/01_demo"
         tables = {path.relative_to(outputs): hashlib.sha256(path.read_bytes()).hexdigest()
                   for path in (outputs / "tables").rglob("*.csv")}

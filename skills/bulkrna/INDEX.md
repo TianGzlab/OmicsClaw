@@ -28,7 +28,7 @@ Bulk RNA-seq: FASTQ QC, alignment, count QC, DE (DESeq2), enrichment, splicing, 
   triggers: bulk deconvolution, cell type proportion, NNLS, CIBERSORTx, bulk deconv, cell fraction
 - `bulkrna-enrichment` — Load when running pathway / GO term enrichment on a bulk RNA-seq DE result list. Skip when the input is single-cell (use sc-enrichment); the input is spatial (use spatial-enrichment); metabolite pathways (use metabolomics-pathway-enrichment).
   triggers: bulk enrichment, pathway analysis, GSEA, ORA, GO enrichment, KEGG, bulk pathway
-- `bulkrna-geneid-mapping` — Load when converting gene identifiers between Ensembl, Entrez, and HGNC symbol in a bulk RNA-seq count matrix. Skip when the input is already in the desired identifier system; organisms outside human/mouse; non-bulk-counts inputs.
+- `bulkrna-geneid-mapping` — Load when converting Ensembl, Entrez or symbol IDs in a bulk RNA count matrix using an explicit mapping or a small human demo reference. Skip when IDs already match downstream needs; use fetch_mapping explicitly for MyGene lookup.
   triggers: gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation, convert IDs
 - `bulkrna-ppi-network` — Load when querying STRING for the protein-protein interaction neighborhood of a bulk RNA-seq DEG list and finding hub genes. Skip when pathway enrichment of the same list (use bulkrna-enrichment); de novo co-expression network discovery (use bulkrna-coexpression).
   triggers: PPI, protein interaction, STRING, network, hub gene, interactome

@@ -5,4 +5,4 @@
 The function library returns tables and Figures without file writes.
 `run_info` reads DataFrame diagnostics; `keep=False` removes them.
 
-`annotate` rejects other database labels without reference data. Each query can have multiple candidate rows in `tables/annotations.csv`; Unknown rows retain unmatched queries. Confidence labels describe ppm bins, not identification probability.
+`annotate` rejects missing reference data. Each query can have multiple candidate rows in `tables/annotations.csv`; Unknown rows retain unmatched queries. Confidence labels describe ppm bins, not identification probability. `result.json` preserves `data.run_info.reference_scope` as demo or provided.

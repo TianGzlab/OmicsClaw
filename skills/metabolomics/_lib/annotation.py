@@ -74,6 +74,8 @@ def annotate_mz(
 
     All matches within tolerance are reported (not just the first).
     """
+    if reference is None:
+        raise ValueError('An explicit reference is required')
     if adducts is None:
         adducts = ["[M+H]+", "[M-H]-"]
 
@@ -86,7 +88,7 @@ def annotate_mz(
 
     for mz in mz_values:
         matched = False
-        for name, neutral_mass, db_id, formula in (DEMO_METABOLITES if reference is None else reference):
+        for name, neutral_mass, db_id, formula in reference:
             for adduct in adducts:
                 theo_mz = _compute_adduct_mz(neutral_mass, adduct)
                 error_ppm = abs(mz - theo_mz) / theo_mz * 1e6

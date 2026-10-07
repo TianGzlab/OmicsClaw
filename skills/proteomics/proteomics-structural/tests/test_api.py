@@ -25,3 +25,17 @@ def test_missing_distances_are_not_reported_as_passed_constraints():
 def test_missing_protein_identifiers_do_not_become_intra_protein_links():
     with pytest.raises(ValueError, match='protein_a.*protein_b'):
         load_skill('proteomics-structural').analyse_crosslinks(pd.DataFrame({'score':[1]}))
+
+
+@pytest.mark.parametrize('distances,checked,rate', [([20., float('nan')], 1, 100.),
+                                                 ([float('nan'), float('nan')], 0, None)])
+def test_partial_missing_distances_are_unchecked_not_failed(distances, checked, rate):
+    lib = load_skill('proteomics-structural')
+    data = pd.DataFrame({'protein_a': ['A', 'B'], 'protein_b': ['B', 'C'], 'distance_angstrom': distances})
+    result = lib.analyse_crosslinks(data)
+    assert pd.isna(result.loc[1, 'constraint_satisfied'])
+    info = lib.run_info(result)
+    assert info['n_distance_checked'] == checked
+    assert info['n_distance_unchecked'] == 2 - checked
+    assert info['distance_checked'] is bool(checked)
+    assert info['summary']['constraint_satisfaction_rate'] == rate

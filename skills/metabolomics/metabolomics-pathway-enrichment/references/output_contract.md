@@ -5,4 +5,4 @@
 The function library returns tables and Figures without file writes.
 `run_info` reads DataFrame diagnostics; `keep=False` removes them.
 
-`enrich` implements only ora and rejects fella/mummichog. Default reference_scope is demo; supply pathways= for real local reference data. `tables/pathway_enrichment.csv` has a stable schema even with no overlap.
+`enrich` requires explicit `pathways=` and implements only ora. `result.json` preserves `data.run_info.reference_scope` as demo or provided. `tables/pathway_enrichment.csv` has a stable schema even with no overlap.

@@ -1,8 +1,8 @@
 ---
 name: metabolomics-pathway-enrichment
-description: Load when running over-representation analysis (ORA) on a metabolite list via Fisher's exact
-  test against a built-in 9-pathway DEMO dictionary, BH-FDR adjusted. Skip when needing real KEGG / Reactome
-  (this skill is demo-only); `mummichog` / `fella` topology methods (use those external tools).
+description: Load when running metabolite-name ORA against an explicit local pathway reference with BH-FDR;
+  bundled pathway sets are for explicit demonstrations only. Skip m/z annotation (use metabolomics-annotation)
+  and topology analysis or online pathway retrieval (use external mummichog / FELLA or database tools).
 trigger: metabolomics pathway, KEGG, MetaboAnalyst, enrichment, mummichog
 tags:
 - metabolomics
@@ -23,10 +23,13 @@ Run metabolite-name ORA against explicit pathways or nine demo pathways. Externa
 
 ```python
 import pandas as pd
+import json
+from pathlib import Path
 from skills._sdk.notebook import load_skill, read_input, write_output
 library = load_skill("metabolomics-pathway-enrichment")
 data = read_input('features.csv', reader=pd.read_csv)
-result = library.enrich(data['metabolite'])
+pathways = read_input('pathways.json', reader=lambda path: json.loads(Path(path).read_text()))
+result = library.enrich(data['metabolite'], pathways=pathways)
 write_output(result, 'tables/result.csv')
 ```
 
@@ -45,9 +48,15 @@ Test case-insensitive exact metabolite-name overlap by hypergeometric ORA.
 
 :param data: Iterable of metabolite names; duplicates count once in each overlap.
 :param method: CLI default ora, the only implemented method.
-:param pathways: Mapping of pathway names to metabolites lists and kegg_id labels; None uses nine demo pathways.
+:param pathways: Required mapping of pathway names to metabolites lists and kegg_id labels; use demo_pathways() only for demonstrations.
 :returns: A new table; BH FDR covers pathways with at least one hit, matching the CLI.
 :raises ValueError: A requested method is unimplemented or reference is empty.
+
+### `demo_pathways()`
+
+Return an independent copy of the nine illustrative pathway sets.
+
+:returns: A mapping for explicit demo use, not a complete pathway database.
 
 ### `run_info(data, *, keep=True)`
 
@@ -75,17 +84,20 @@ Matching is case-insensitive exact name equality, not substring matching. The ba
 
 ## Gotchas
 
-- `enrich` implements only ora and rejects fella/mummichog. Default reference_scope is demo; supply pathways= for real local reference data. `tables/pathway_enrichment.csv` has a stable schema even with no overlap.
+- `enrich` requires explicit `pathways=` and implements only ora. Missing reference data and fella/mummichog requests fail. `demo_pathways()` explicitly selects the nine illustrative sets; never use these as biological evidence.
+- `tables/pathway_enrichment.csv` has a stable schema even with no overlap. `result.json` records the reference scope in `data.run_info.reference_scope`.
 
 ## Inputs and outputs
 
 CSV input; `tables/pathway_enrichment.csv`, `report.md` and `result.json`. Demo mode also writes its synthetic input CSV at the output root.
+Real input also requires a JSON reference: `{"pathway name": {"kegg_id": "identifier", "metabolites": ["glucose", "pyruvate"]}}`.
 The function library returns objects; the CLI and step own file writes.
 
 ## CLI
 
 ```bash
 python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py --demo --output /tmp/metabolomics_pathway_enrichment
+python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py --input features.csv --pathway-file pathways.json --output /tmp/metabolomics_pathway_real
 ```
 
 ## See also

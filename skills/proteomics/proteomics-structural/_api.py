@@ -1,5 +1,6 @@
 """Summarize existing cross-link identifications and measured distances."""
 import pandas as pd
+import numpy as np
 from skills.proteomics._lib import structural as core
 from skills.proteomics._lib.table_info import attach, read_info
 
@@ -22,12 +23,20 @@ def analyse_crosslinks(data: pd.DataFrame, *, fdr_threshold: float = 0.05,
         raise ValueError('protein_a and protein_b must contain identifiers for every row')
     if crosslinker not in core.CROSSLINKER_CONSTRAINTS or not 0 <= fdr_threshold <= 1:
         raise ValueError('Unknown crosslinker or fdr_threshold outside [0, 1]')
+    if 'distance_angstrom' in data:
+        distances = pd.to_numeric(data['distance_angstrom'], errors='raise')
+        if np.isinf(distances).any() or (distances.dropna() < 0).any():
+            raise ValueError('Distances must be finite, nonnegative or missing')
+        data = data.assign(distance_angstrom=distances)
     result, summary = core.analyse_crosslinks(data, fdr_threshold, crosslinker)
-    checked = 'distance_angstrom' in data
+    n_checked = int(result['distance_angstrom'].notna().sum()) if 'distance_angstrom' in result else 0
+    checked = n_checked > 0
     if not checked:
         for key in ('n_constraint_satisfied','n_constraint_violated','constraint_satisfaction_rate'):
             summary[key] = None
-    return attach(result, fdr_checked='fdr' in data, distance_checked=checked, summary=summary)
+    return attach(result, fdr_checked='fdr' in data, distance_checked=checked,
+                  n_distance_checked=n_checked, n_distance_unchecked=len(result) - n_checked,
+                  summary=summary)
 
 
 def run_info(table: pd.DataFrame, *, keep: bool = True) -> dict:

@@ -126,7 +126,9 @@ def pathway_enrichment(
         len(metabolite_list), method,
     )
 
-    reference = DEMO_METABOLIC_PATHWAYS if pathways is None else pathways
+    if pathways is None:
+        raise ValueError('An explicit pathways reference is required')
+    reference = pathways
     background = {m.lower() for info in reference.values() for m in info["metabolites"]}
     query = set(m.lower() for m in metabolite_list)
     N = len(background)  # background size
